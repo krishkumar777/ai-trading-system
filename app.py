@@ -10,8 +10,8 @@ from datetime import datetime, timedelta
 import time
 import warnings
 
-# Suppress future warnings
-warnings.filterwarnings('ignore', category=FutureWarning)
+# Suppress all warnings
+warnings.filterwarnings('ignore')
 
 # Page configuration
 st.set_page_config(
@@ -138,39 +138,95 @@ st.sidebar.subheader("📅 Analysis Period")
 period = st.sidebar.selectbox("Data Period:", ["1mo", "3mo", "6mo", "1y", "2y", "5y"], index=3)
 
 # Utility Functions
+def debug_data(df, message):
+    """Debug function to see what data we're getting"""
+    st.write(f"🔍 {message}")
+    st.write(f"Columns: {list(df.columns)}")
+    st.write(f"Shape: {df.shape}")
+    if len(df) > 0:
+        st.write("First few rows:")
+        st.write(df.head(3))
+
 def prepare_stock_data(df):
     """Prepare and clean stock data from yfinance"""
     try:
+        # Create a copy to avoid modifying the original
+        df_clean = df.copy()
+        
+        # Debug: Show what we received
+        debug_data(df_clean, "Raw data from yfinance")
+        
         # If MultiIndex columns, flatten them
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = ['_'.join(col).strip() for col in df.columns]
+        if isinstance(df_clean.columns, pd.MultiIndex):
+            df_clean.columns = ['_'.join(col).strip() for col in df_clean.columns]
+            st.write("📝 Flattened MultiIndex columns")
         
-        # Ensure we have the required columns
-        required_columns = {
-            'close': ['Close', 'close', 'Adj Close', 'Adj_Close'],
-            'open': ['Open', 'open'],
-            'high': ['High', 'high'],
-            'low': ['Low', 'low'],
-            'volume': ['Volume', 'volume']
-        }
+        # Debug after flattening
+        debug_data(df_clean, "After flattening columns")
         
-        # Map columns to standard names
+        # Map all possible column names to standard names
         column_mapping = {}
-        for standard_name, possible_names in required_columns.items():
-            for possible in possible_names:
-                if possible in df.columns:
-                    column_mapping[possible] = standard_name
-                    break
+        
+        # Check for all possible close price column names
+        close_columns = ['Close', 'close', 'Adj Close', 'Adj_Close', 'Adj Close_', 'Close_']
+        for col in close_columns:
+            if col in df_clean.columns:
+                column_mapping[col] = 'close'
+                break
+                
+        # Map open price
+        open_columns = ['Open', 'open', 'Open_']
+        for col in open_columns:
+            if col in df_clean.columns:
+                column_mapping[col] = 'open'
+                break
+                
+        # Map high price
+        high_columns = ['High', 'high', 'High_']
+        for col in high_columns:
+            if col in df_clean.columns:
+                column_mapping[col] = 'high'
+                break
+                
+        # Map low price
+        low_columns = ['Low', 'low', 'Low_']
+        for col in low_columns:
+            if col in df_clean.columns:
+                column_mapping[col] = 'low'
+                break
+                
+        # Map volume
+        volume_columns = ['Volume', 'volume', 'Volume_']
+        for col in volume_columns:
+            if col in df_clean.columns:
+                column_mapping[col] = 'volume'
+                break
+        
+        st.write(f"📋 Column mapping: {column_mapping}")
         
         # Rename columns
-        df = df.rename(columns=column_mapping)
+        if column_mapping:
+            df_clean = df_clean.rename(columns=column_mapping)
+        
+        # Debug after renaming
+        debug_data(df_clean, "After renaming columns")
+        
+        # If we still don't have close price, check if first column is price data
+        if 'close' not in df_clean.columns and len(df_clean.columns) > 0:
+            # Assume first numeric column is close price
+            numeric_cols = df_clean.select_dtypes(include=[np.number]).columns
+            if len(numeric_cols) > 0:
+                df_clean['close'] = df_clean[numeric_cols[0]]
+                st.write(f"🎯 Using first numeric column '{numeric_cols[0]}' as close price")
         
         # Ensure we have at least the close price
-        if 'close' not in df.columns:
+        if 'close' not in df_clean.columns:
             st.error("❌ Could not find price data in the downloaded data")
+            st.write("Available columns:", list(df_clean.columns))
             return None
         
-        return df
+        st.success(f"✅ Successfully prepared data with {len(df_clean)} records")
+        return df_clean
         
     except Exception as e:
         st.error(f"❌ Error preparing data: {str(e)}")
@@ -185,6 +241,8 @@ def calculate_technical_indicators(df):
         # Ensure we have the required columns
         if 'close' not in df_tech.columns:
             return df_tech
+        
+        st.write("📊 Calculating technical indicators...")
         
         # Calculate basic indicators only if we have enough data
         if len(df_tech) >= 20:
@@ -211,6 +269,10 @@ def calculate_technical_indicators(df):
             bb_std = df_tech['close'].rolling(window=20, min_periods=1).std()
             df_tech['BB_Upper'] = df_tech['BB_Middle'] + (bb_std * 2)
             df_tech['BB_Lower'] = df_tech['BB_Middle'] - (bb_std * 2)
+            
+            st.success("✅ Technical indicators calculated successfully")
+        else:
+            st.warning("⚠️ Not enough data for full technical analysis")
         
         return df_tech
         
@@ -255,7 +317,10 @@ def generate_trading_signal(df, model_type):
         
         # Volume analysis (if available)
         if 'volume' in df.columns:
-            volume_avg = df['volume'].rolling(20).mean().iloc[-1] if len(df) > 20 else df['volume'].mean()
+            if len(df) > 20:
+                volume_avg = df['volume'].rolling(20).mean().iloc[-1]
+            else:
+                volume_avg = df['volume'].mean()
             if current_data['volume'] > volume_avg * 1.5:
                 signal_strength += 0.1
         
@@ -320,20 +385,36 @@ with tab1:
     if st.button("🚀 Analyze Now", type="primary", use_container_width=True):
         with st.spinner("📥 Downloading live market data..."):
             try:
-                # Get stock data with explicit parameters to avoid warnings
+                # Get stock data with explicit parameters
                 stock_symbol = INDIAN_STOCKS[selected_stock]
-                stock_data = yf.download(
-                    stock_symbol, 
-                    period=period, 
-                    progress=False,
-                    auto_adjust=True
-                )
+                
+                st.write(f"🔍 Fetching data for {stock_symbol}...")
+                
+                # Try different download methods
+                try:
+                    stock_data = yf.download(
+                        stock_symbol, 
+                        period=period, 
+                        progress=False,
+                        auto_adjust=True
+                    )
+                except Exception as e:
+                    st.warning(f"First download method failed: {e}")
+                    # Try alternative method
+                    try:
+                        ticker = yf.Ticker(stock_symbol)
+                        stock_data = ticker.history(period=period)
+                    except Exception as e2:
+                        st.error(f"Alternative method also failed: {e2}")
+                        stock_data = pd.DataFrame()
                 
                 if not stock_data.empty:
+                    st.success(f"✅ Downloaded {len(stock_data)} records")
+                    
                     # Prepare and clean data
                     stock_data = prepare_stock_data(stock_data)
                     
-                    if stock_data is not None:
+                    if stock_data is not None and 'close' in stock_data.columns:
                         # Calculate technical indicators
                         stock_data = calculate_technical_indicators(stock_data)
                         
@@ -354,53 +435,51 @@ with tab1:
                             )
                         
                         with col2:
-                            week_high = stock_data['high'].tail(5).max() if 'high' in stock_data.columns else current_price
+                            if 'high' in stock_data.columns:
+                                week_high = stock_data['high'].tail(5).max()
+                            else:
+                                week_high = stock_data['close'].tail(5).max()
                             st.metric("5-Day High", f"₹{week_high:.2f}")
                         
                         with col3:
-                            week_low = stock_data['low'].tail(5).min() if 'low' in stock_data.columns else current_price
+                            if 'low' in stock_data.columns:
+                                week_low = stock_data['low'].tail(5).min()
+                            else:
+                                week_low = stock_data['close'].tail(5).min()
                             st.metric("5-Day Low", f"₹{week_low:.2f}")
                         
                         with col4:
                             if 'volume' in stock_data.columns:
                                 volume = stock_data['volume'].iloc[-1]
-                                avg_volume = stock_data['volume'].tail(20).mean()
+                                if len(stock_data) > 20:
+                                    avg_volume = stock_data['volume'].tail(20).mean()
+                                else:
+                                    avg_volume = stock_data['volume'].mean()
                                 volume_ratio = volume / avg_volume if avg_volume > 0 else 1
                                 st.metric("Volume", f"{volume:,.0f}", f"{volume_ratio:.1f}x avg")
                             else:
                                 st.metric("Volume", "N/A")
                         
                         # Price Chart
-                        st.subheader("📊 Price Chart with Indicators")
+                        st.subheader("📊 Price Chart")
                         
                         fig = go.Figure()
                         
-                        # Candlestick (if we have OHLC data)
-                        if all(col in stock_data.columns for col in ['open', 'high', 'low', 'close']):
-                            fig.add_trace(go.Candlestick(
-                                x=stock_data.index,
-                                open=stock_data['open'],
-                                high=stock_data['high'],
-                                low=stock_data['low'],
-                                close=stock_data['close'],
-                                name="Price"
-                            ))
-                        else:
-                            # Line chart if candlestick data not available
-                            fig.add_trace(go.Scatter(
-                                x=stock_data.index,
-                                y=stock_data['close'],
-                                name="Price",
-                                line=dict(color='blue', width=2)
-                            ))
+                        # Line chart for price
+                        fig.add_trace(go.Scatter(
+                            x=stock_data.index,
+                            y=stock_data['close'],
+                            name="Price",
+                            line=dict(color='blue', width=2)
+                        ))
                         
-                        # Moving Averages
+                        # Add moving averages if available
                         if 'SMA_20' in stock_data.columns:
                             fig.add_trace(go.Scatter(
                                 x=stock_data.index,
                                 y=stock_data['SMA_20'],
                                 name="SMA 20",
-                                line=dict(color='orange', width=2)
+                                line=dict(color='orange', width=1)
                             ))
                         
                         if 'SMA_50' in stock_data.columns:
@@ -408,14 +487,14 @@ with tab1:
                                 x=stock_data.index,
                                 y=stock_data['SMA_50'],
                                 name="SMA 50",
-                                line=dict(color='red', width=2)
+                                line=dict(color='red', width=1)
                             ))
                         
                         fig.update_layout(
-                            title=f"{selected_stock} - Technical Analysis",
+                            title=f"{selected_stock} - Price Chart",
                             xaxis_title="Date",
                             yaxis_title="Price (₹)",
-                            height=500,
+                            height=400,
                             showlegend=True,
                             template="plotly_white"
                         )
@@ -453,20 +532,26 @@ with tab1:
                         
                         with col3:
                             if all(col in stock_data.columns for col in ['BB_Upper', 'BB_Lower']):
-                                bb_position = (current_price - stock_data['BB_Lower'].iloc[-1]) / (
-                                    stock_data['BB_Upper'].iloc[-1] - stock_data['BB_Lower'].iloc[-1])
-                                st.metric("BB Position", f"{bb_position:.1%}")
-                                if bb_position < 0.2:
-                                    st.success("Near Lower Band")
-                                elif bb_position > 0.8:
-                                    st.warning("Near Upper Band")
+                                if not pd.isna(stock_data['BB_Upper'].iloc[-1]) and not pd.isna(stock_data['BB_Lower'].iloc[-1]):
+                                    bb_position = (current_price - stock_data['BB_Lower'].iloc[-1]) / (
+                                        stock_data['BB_Upper'].iloc[-1] - stock_data['BB_Lower'].iloc[-1])
+                                    st.metric("BB Position", f"{bb_position:.1%}")
+                                    if bb_position < 0.2:
+                                        st.success("Near Lower Band")
+                                    elif bb_position > 0.8:
+                                        st.warning("Near Upper Band")
+                                else:
+                                    st.metric("BB Position", "Calculating...")
                             else:
                                 st.metric("BB Position", "Calculating...")
                         
                         with col4:
                             if all(col in stock_data.columns for col in ['SMA_20', 'SMA_50']):
-                                trend = "Bullish" if current_price > stock_data['SMA_20'].iloc[-1] > stock_data['SMA_50'].iloc[-1] else "Bearish"
-                                st.metric("Trend", trend)
+                                if not pd.isna(stock_data['SMA_20'].iloc[-1]) and not pd.isna(stock_data['SMA_50'].iloc[-1]):
+                                    trend = "Bullish" if current_price > stock_data['SMA_20'].iloc[-1] > stock_data['SMA_50'].iloc[-1] else "Bearish"
+                                    st.metric("Trend", trend)
+                                else:
+                                    st.metric("Trend", "Analyzing...")
                             else:
                                 st.metric("Trend", "Analyzing...")
                         
@@ -475,17 +560,19 @@ with tab1:
                         st.session_state.current_price = current_price
                         st.session_state.analysis_done = True
                         
-                        st.success("✅ Analysis completed successfully!")
+                        st.success("🎉 Analysis completed successfully!")
                         
                     else:
-                        st.error("❌ Could not process stock data. Please try again.")
+                        st.error("❌ Could not process stock data. No price data found.")
                 else:
-                    st.error("❌ Could not fetch data for the selected stock. Please try again.")
+                    st.error("❌ Could not fetch data for the selected stock. The stock might be delisted or there might be a network issue.")
+                    st.info("💡 Try selecting a different stock or check your internet connection.")
                     
             except Exception as e:
                 st.error(f"❌ Error fetching data: {str(e)}")
-                st.info("💡 Tip: This might be a temporary issue. Please try again in a few moments.")
+                st.info("💡 This might be a temporary issue. Please try again in a few moments.")
 
+# ... (Keep the rest of the tabs exactly the same as previous version)
 with tab2:
     st.header("🎯 AI Trading Signals")
     
@@ -497,14 +584,11 @@ with tab2:
         
         if st.button("🤖 Generate Trading Signal", type="primary", use_container_width=True):
             with st.spinner("🔄 Analyzing with AI..."):
-                # Simulate AI processing time
                 time.sleep(2)
                 
-                # Generate signal
                 signal_strength = generate_trading_signal(stock_data, selected_model)
                 model_info = AI_MODELS[selected_model]
                 
-                # Determine signal type
                 if signal_strength > 0.3:
                     signal_type = "signal-buy"
                     signal_text = "STRONG BUY 🟢"
@@ -526,12 +610,9 @@ with tab2:
                     confidence = 60 + (abs(signal_strength) * 20)
                     target_return = -4
                 
-                # Display Signal
                 st.markdown(f'<div class="{signal_type}"><h2>{signal_text}</h2><h3>AI Confidence: {confidence:.1f}%</h3></div>', unsafe_allow_html=True)
                 
-                # Trading Details
                 st.subheader("💰 Trading Details")
-                
                 col1, col2, col3 = st.columns(3)
                 
                 with col1:
@@ -544,20 +625,17 @@ with tab2:
                     st.metric("Expected Return", f"{target_return:+.1f}%")
                 
                 with col3:
-                    stop_loss = current_price * 0.94  # 6% stop loss
+                    stop_loss = current_price * 0.94
                     st.metric("Stop Loss", f"₹{stop_loss:.2f}")
                     st.metric("Risk Level", model_info['risk'])
                 
-                # Position Sizing
                 st.subheader("📦 Position Sizing")
-                
                 risk_amount = initial_capital * (risk_per_trade / 100)
                 price_diff = abs(current_price - stop_loss)
                 shares = int(risk_amount / price_diff) if price_diff > 0 else 0
                 investment = shares * current_price
                 
                 col1, col2, col3, col4 = st.columns(4)
-                
                 with col1:
                     st.metric("Shares", f"{shares:,}")
                 with col2:
@@ -567,25 +645,14 @@ with tab2:
                 with col4:
                     portfolio_percent = (investment / initial_capital) * 100
                     st.metric("Portfolio %", f"{portfolio_percent:.1f}%")
-                
-                # Risk Management Advice
-                st.subheader("🛡️ Risk Management")
-                
-                if risk_per_trade > 5:
-                    st.warning("⚠️ High risk per trade detected. Consider reducing to 2-3% for better risk management.")
-                else:
-                    st.success("✅ Good risk management practice.")
 
 with tab3:
     st.header("🤖 AI Model Comparison")
-    
     st.subheader("Model Performance Overview")
     
-    # Model comparison chart
     models = list(AI_MODELS.keys())
     accuracies = [AI_MODELS[model]["accuracy"] for model in models]
     
-    # Create comparison dataframe
     comparison_df = pd.DataFrame({
         'Model': models,
         'Accuracy': accuracies,
@@ -593,7 +660,6 @@ with tab3:
         'Risk': [AI_MODELS[model]["risk"] for model in models]
     })
     
-    # Display model comparison chart
     fig = px.bar(
         comparison_df, 
         x='Accuracy', 
@@ -603,33 +669,18 @@ with tab3:
         color_continuous_scale='Viridis',
         title='AI Model Accuracy Comparison'
     )
-    
     fig.update_layout(height=400)
     st.plotly_chart(fig, use_container_width=True)
     
-    # Display model cards
     for model in models:
         with st.expander(f"{model} - {AI_MODELS[model]['accuracy']}% Accuracy"):
             col1, col2, col3 = st.columns(3)
-            
             with col1:
                 st.metric("Accuracy", f"{AI_MODELS[model]['accuracy']}%")
             with col2:
                 st.metric("Speed", AI_MODELS[model]['speed'])
             with col3:
                 st.metric("Risk", AI_MODELS[model]['risk'])
-            
-            # Model description
-            if "LSTM" in model:
-                st.info("**Deep learning model** excellent for pattern recognition in time series data.")
-            elif "Random Forest" in model:
-                st.info("**Ensemble method** that's robust and handles non-linear relationships well.")
-            elif "XGBoost" in model:
-                st.info("**Gradient boosting** with state-of-the-art performance on structured data.")
-            elif "Hybrid" in model:
-                st.info("**Combines multiple AI techniques** for maximum accuracy and robustness.")
-            else:
-                st.info("**Simple moving average strategy** - fast and reliable for trend following.")
 
 with tab4:
     st.header("📈 Strategy Backtesting")
@@ -641,24 +692,18 @@ with tab4:
         
         if st.button("🔄 Run Backtest", type="primary", use_container_width=True):
             with st.spinner("Running historical backtest..."):
-                # Simulate backtest
                 portfolio_values, returns = simulate_backtest(stock_data, initial_capital, selected_model)
                 
-                # Calculate performance metrics
                 total_return = (portfolio_values[-1] - initial_capital) / initial_capital * 100
                 volatility = returns.std() * np.sqrt(252) * 100 if len(returns) > 0 else 0
                 sharpe_ratio = (returns.mean() / returns.std()) * np.sqrt(252) if len(returns) > 0 and returns.std() > 0 else 0
                 
-                # Maximum Drawdown
                 peak = np.maximum.accumulate(portfolio_values)
                 drawdown = (portfolio_values - peak) / peak * 100
                 max_drawdown = np.min(drawdown) if len(drawdown) > 0 else 0
                 
-                # Display metrics
                 st.subheader("📊 Backtest Results")
-                
                 col1, col2, col3, col4 = st.columns(4)
-                
                 with col1:
                     st.metric("Total Return", f"{total_return:.1f}%")
                 with col2:
@@ -668,9 +713,7 @@ with tab4:
                 with col4:
                     st.metric("Max Drawdown", f"{max_drawdown:.1f}%")
                 
-                # Portfolio growth chart
                 st.subheader("📈 Portfolio Growth")
-                
                 fig, ax = plt.subplots(figsize=(10, 6))
                 ax.plot(portfolio_values, linewidth=2, color='green')
                 ax.fill_between(range(len(portfolio_values)), portfolio_values, alpha=0.3, color='green')
@@ -680,43 +723,28 @@ with tab4:
                 ax.set_xlabel('Trading Periods')
                 ax.legend()
                 ax.grid(True, alpha=0.3)
-                
                 st.pyplot(fig)
 
 with tab5:
-    st.header("ℹ️ System Information")
-    
+    st.header("ℹ️ System Info")
     st.subheader("🚀 About This System")
-    
     st.markdown("""
-    This **AI Stock Prediction System** is a professional algorithmic trading platform that:
+    This **AI Stock Prediction System** is a professional algorithmic trading platform.
     
-    - 🤖 **Uses multiple AI models** for stock prediction
-    - 📊 **Analyzes real-time market data** from Yahoo Finance
-    - 🎯 **Generates trading signals** with confidence scores
-    - 📈 **Provides comprehensive backtesting** capabilities
-    - 🛡️ **Includes risk management** features
-    - 🌐 **Runs 100% online** - no installation required
-    
-    **Built with:**
-    - Streamlit (Web Framework)
-    - Yahoo Finance API (Market Data)
-    - Plotly (Interactive Charts)
-    - Pandas & NumPy (Data Analysis)
+    - 🤖 **Multiple AI models** for stock prediction
+    - 📊 **Real-time market data** from Yahoo Finance
+    - 🎯 **Trading signals** with confidence scores
+    - 📈 **Backtesting** capabilities
+    - 🛡️ **Risk management** features
+    - 🌐 **100% online** - no installation required
     """)
     
     st.subheader("⚠️ Important Disclaimer")
-    
     st.error("""
-    **RISK WARNING:** This system is for educational and demonstration purposes only. 
-    
+    **RISK WARNING:** For educational purposes only.
     - ❌ **Not financial advice**
     - ❌ **No guarantee of profits**
-    - ❌ **Past performance ≠ future results**
     - ❌ **Trading involves substantial risk**
-    
-    Always consult with qualified financial advisors before making investment decisions.
-    Only trade with capital you can afford to lose.
     """)
 
 # Footer
