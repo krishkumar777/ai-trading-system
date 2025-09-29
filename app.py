@@ -1,4 +1,4 @@
-# app.py - Complete Online AI Trading System
+# app.py - Fixed Version for Streamlit Cloud
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -8,8 +8,6 @@ import plotly.express as px
 import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
 import time
-import requests
-import json
 
 # Page configuration
 st.set_page_config(
@@ -63,26 +61,6 @@ st.markdown("""
         text-align: center;
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
     }
-    .model-card {
-        background: white;
-        border-radius: 10px;
-        padding: 1.5rem;
-        margin: 1rem 0;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-        border: 1px solid #e0e0e0;
-    }
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 2px;
-    }
-    .stTabs [data-baseweb="tab"] {
-        height: 50px;
-        white-space: pre-wrap;
-        background-color: #f0f2f6;
-        border-radius: 5px 5px 0px 0px;
-        gap: 1px;
-        padding-top: 10px;
-        padding-bottom: 10px;
-    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -108,16 +86,7 @@ INDIAN_STOCKS = {
     "BHARTI AIRTEL": "BHARTIARTL.NS",
     "ITC LIMITED": "ITC.NS",
     "LARSEN & TOUBRO": "LT.NS",
-    "KOTAK BANK": "KOTAKBANK.NS",
-    "AXIS BANK": "AXISBANK.NS",
-    "BAJAJ FINANCE": "BAJFINANCE.NS",
-    "ASIAN PAINTS": "ASIANPAINT.NS",
-    "MARUTI SUZUKI": "MARUTI.NS",
-    "TITAN COMPANY": "TITAN.NS",
-    "SUN PHARMA": "SUNPHARMA.NS",
-    "TATA MOTORS": "TATAMOTORS.NS",
-    "WIPRO": "WIPRO.NS",
-    "HCL TECHNOLOGIES": "HCLTECH.NS"
+    "KOTAK BANK": "KOTAKBANK.NS"
 }
 
 selected_stock = st.sidebar.selectbox(
@@ -148,75 +117,113 @@ risk_per_trade = st.sidebar.slider("Risk per Trade (%):", 1, 10, 2)
 st.sidebar.subheader("📅 Analysis Period")
 period = st.sidebar.selectbox("Data Period:", ["1mo", "3mo", "6mo", "1y", "2y", "5y"], index=3)
 
-# Main Tabs
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    "📊 Live Analysis", 
-    "🎯 Trading Signals", 
-    "🤖 AI Models", 
-    "📈 Backtesting",
-    "ℹ️ System Info"
-])
-
 # Utility Functions
-def calculate_technical_indicators(df):
-    """Calculate technical indicators for the stock"""
-    # Moving Averages
-    df['SMA_20'] = df['Close'].rolling(window=20).mean()
-    df['SMA_50'] = df['Close'].rolling(window=50).mean()
-    df['EMA_12'] = df['Close'].ewm(span=12).mean()
-    df['EMA_26'] = df['Close'].ewm(span=26).mean()
+def prepare_stock_data(df):
+    """Prepare and clean stock data from yfinance"""
+    # If MultiIndex columns, flatten them
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = ['_'.join(col).strip() for col in df.columns]
     
-    # RSI
-    delta = df['Close'].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-    rs = gain / loss
-    df['RSI'] = 100 - (100 / (1 + rs))
+    # Ensure we have the required columns
+    required_columns = {
+        'close': ['Close', 'close', 'Adj Close', 'Adj_Close'],
+        'open': ['Open', 'open'],
+        'high': ['High', 'high'],
+        'low': ['Low', 'low'],
+        'volume': ['Volume', 'volume']
+    }
     
-    # MACD
-    df['MACD'] = df['EMA_12'] - df['EMA_26']
-    df['MACD_Signal'] = df['MACD'].ewm(span=9).mean()
-    df['MACD_Histogram'] = df['MACD'] - df['MACD_Signal']
+    # Map columns to standard names
+    column_mapping = {}
+    for standard_name, possible_names in required_columns.items():
+        for possible in possible_names:
+            if possible in df.columns:
+                column_mapping[possible] = standard_name
+                break
     
-    # Bollinger Bands
-    df['BB_Middle'] = df['Close'].rolling(window=20).mean()
-    bb_std = df['Close'].rolling(window=20).std()
-    df['BB_Upper'] = df['BB_Middle'] + (bb_std * 2)
-    df['BB_Lower'] = df['BB_Middle'] - (bb_std * 2)
+    # Rename columns
+    df = df.rename(columns=column_mapping)
+    
+    # Ensure we have at least the close price
+    if 'close' not in df.columns:
+        st.error("❌ Could not find price data in the downloaded data")
+        return None
     
     return df
 
+def calculate_technical_indicators(df):
+    """Calculate technical indicators for the stock"""
+    # Make a copy to avoid modifying original
+    df_tech = df.copy()
+    
+    # Ensure we have the required columns
+    if 'close' not in df_tech.columns:
+        st.error("❌ Missing close price data")
+        return df_tech
+    
+    # Moving Averages
+    df_tech['SMA_20'] = df_tech['close'].rolling(window=20).mean()
+    df_tech['SMA_50'] = df_tech['close'].rolling(window=50).mean()
+    df_tech['EMA_12'] = df_tech['close'].ewm(span=12).mean()
+    df_tech['EMA_26'] = df_tech['close'].ewm(span=26).mean()
+    
+    # RSI
+    delta = df_tech['close'].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+    rs = gain / loss
+    df_tech['RSI'] = 100 - (100 / (1 + rs))
+    
+    # MACD
+    df_tech['MACD'] = df_tech['EMA_12'] - df_tech['EMA_26']
+    df_tech['MACD_Signal'] = df_tech['MACD'].ewm(span=9).mean()
+    df_tech['MACD_Histogram'] = df_tech['MACD'] - df_tech['MACD_Signal']
+    
+    # Bollinger Bands
+    df_tech['BB_Middle'] = df_tech['close'].rolling(window=20).mean()
+    bb_std = df_tech['close'].rolling(window=20).std()
+    df_tech['BB_Upper'] = df_tech['BB_Middle'] + (bb_std * 2)
+    df_tech['BB_Lower'] = df_tech['BB_Middle'] - (bb_std * 2)
+    
+    return df_tech
+
 def generate_trading_signal(df, model_type):
     """Generate trading signal based on technical analysis and AI model"""
+    if len(df) == 0:
+        return 0
+    
     current_data = df.iloc[-1]
     
     # Base signal strength from technical indicators
     signal_strength = 0
     
     # Price vs Moving Averages
-    if current_data['Close'] > current_data['SMA_20'] > current_data['SMA_50']:
-        signal_strength += 0.3
-    elif current_data['Close'] > current_data['SMA_20']:
-        signal_strength += 0.15
-    elif current_data['Close'] < current_data['SMA_50']:
-        signal_strength -= 0.2
+    if 'SMA_20' in current_data and 'SMA_50' in current_data:
+        if current_data['close'] > current_data['SMA_20'] > current_data['SMA_50']:
+            signal_strength += 0.3
+        elif current_data['close'] > current_data['SMA_20']:
+            signal_strength += 0.15
+        elif current_data['close'] < current_data['SMA_50']:
+            signal_strength -= 0.2
     
     # RSI Analysis
-    if current_data['RSI'] < 30:
-        signal_strength += 0.2  # Oversold - bullish
-    elif current_data['RSI'] > 70:
-        signal_strength -= 0.2  # Overbought - bearish
+    if 'RSI' in current_data:
+        if current_data['RSI'] < 30:
+            signal_strength += 0.2  # Oversold - bullish
+        elif current_data['RSI'] > 70:
+            signal_strength -= 0.2  # Overbought - bearish
     
     # MACD Analysis
-    if current_data['MACD'] > current_data['MACD_Signal']:
-        signal_strength += 0.15
-    else:
-        signal_strength -= 0.1
+    if 'MACD' in current_data and 'MACD_Signal' in current_data:
+        if current_data['MACD'] > current_data['MACD_Signal']:
+            signal_strength += 0.15
+        else:
+            signal_strength -= 0.1
     
     # Volume analysis (if available)
-    if 'Volume' in df.columns:
-        volume_avg = df['Volume'].rolling(20).mean().iloc[-1]
-        if current_data['Volume'] > volume_avg * 1.5:
+    if 'volume' in df.columns:
+        volume_avg = df['volume'].rolling(20).mean().iloc[-1] if len(df) > 20 else df['volume'].mean()
+        if current_data['volume'] > volume_avg * 1.5:
             signal_strength += 0.1
     
     # Model-specific adjustments
@@ -229,12 +236,16 @@ def generate_trading_signal(df, model_type):
 
 def simulate_backtest(df, initial_capital, model_type):
     """Simulate backtesting performance"""
-    # This is a simplified backtest - in production, you'd use actual model predictions
-    returns = df['Close'].pct_change().dropna()
+    if 'close' not in df.columns or len(df) < 2:
+        return [initial_capital], pd.Series([0])
+    
+    returns = df['close'].pct_change().dropna()
+    
+    if len(returns) == 0:
+        return [initial_capital], pd.Series([0])
     
     # Model-specific performance simulation
     if "LSTM" in model_type or "Hybrid" in model_type:
-        # Better models have higher returns and lower drawdowns
         simulated_returns = returns * np.random.uniform(1.1, 1.3, len(returns))
         volatility_multiplier = 0.8
     elif "XGBoost" in model_type or "Random Forest" in model_type:
@@ -255,152 +266,184 @@ def simulate_backtest(df, initial_capital, model_type):
     
     return portfolio_values, simulated_returns
 
+# Main Tabs
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "📊 Live Analysis", 
+    "🎯 Trading Signals", 
+    "🤖 AI Models", 
+    "📈 Backtesting",
+    "ℹ️ System Info"
+])
+
 with tab1:
     st.header(f"📊 Live Analysis: {selected_stock}")
     
     if st.button("🚀 Analyze Now", type="primary", use_container_width=True):
         with st.spinner("📥 Downloading live market data..."):
-            # Get stock data
-            stock_data = yf.download(INDIAN_STOCKS[selected_stock], period=period)
-            
-            if not stock_data.empty:
-                # Calculate technical indicators
-                stock_data = calculate_technical_indicators(stock_data)
+            try:
+                # Get stock data
+                stock_symbol = INDIAN_STOCKS[selected_stock]
+                stock_data = yf.download(stock_symbol, period=period, progress=False)
                 
-                # Display Key Metrics
-                st.subheader("📈 Key Metrics")
-                col1, col2, col3, col4 = st.columns(4)
-                
-                current_price = stock_data['Close'].iloc[-1]
-                prev_close = stock_data['Close'].iloc[-2] if len(stock_data) > 1 else current_price
-                change = current_price - prev_close
-                change_pct = (change / prev_close) * 100
-                
-                with col1:
-                    st.metric(
-                        "Current Price", 
-                        f"₹{current_price:.2f}",
-                        f"{change:+.2f} ({change_pct:+.2f}%)"
-                    )
-                
-                with col2:
-                    week_high = stock_data['High'].tail(5).max()
-                    st.metric("5-Day High", f"₹{week_high:.2f}")
-                
-                with col3:
-                    week_low = stock_data['Low'].tail(5).min()
-                    st.metric("5-Day Low", f"₹{week_low:.2f}")
-                
-                with col4:
-                    volume = stock_data['Volume'].iloc[-1]
-                    avg_volume = stock_data['Volume'].tail(20).mean()
-                    volume_ratio = volume / avg_volume if avg_volume > 0 else 1
-                    st.metric("Volume", f"{volume:,.0f}", f"{volume_ratio:.1f}x avg")
-                
-                # Price Chart
-                st.subheader("📊 Price Chart with Indicators")
-                
-                fig = go.Figure()
-                
-                # Candlestick
-                fig.add_trace(go.Candlestick(
-                    x=stock_data.index,
-                    open=stock_data['Open'],
-                    high=stock_data['High'],
-                    low=stock_data['Low'],
-                    close=stock_data['Close'],
-                    name="Price"
-                ))
-                
-                # Moving Averages
-                fig.add_trace(go.Scatter(
-                    x=stock_data.index,
-                    y=stock_data['SMA_20'],
-                    name="SMA 20",
-                    line=dict(color='orange', width=2)
-                ))
-                
-                fig.add_trace(go.Scatter(
-                    x=stock_data.index,
-                    y=stock_data['SMA_50'],
-                    name="SMA 50",
-                    line=dict(color='red', width=2)
-                ))
-                
-                # Bollinger Bands
-                fig.add_trace(go.Scatter(
-                    x=stock_data.index,
-                    y=stock_data['BB_Upper'],
-                    name="BB Upper",
-                    line=dict(color='gray', width=1, dash='dash')
-                ))
-                
-                fig.add_trace(go.Scatter(
-                    x=stock_data.index,
-                    y=stock_data['BB_Lower'],
-                    name="BB Lower", 
-                    line=dict(color='gray', width=1, dash='dash'),
-                    fill='tonexty'
-                ))
-                
-                fig.update_layout(
-                    title=f"{selected_stock} - Technical Analysis",
-                    xaxis_title="Date",
-                    yaxis_title="Price (₹)",
-                    height=500,
-                    showlegend=True,
-                    template="plotly_white"
-                )
-                
-                st.plotly_chart(fig, use_container_width=True)
-                
-                # Technical Indicators
-                st.subheader("🔧 Technical Indicators")
-                
-                col1, col2, col3, col4 = st.columns(4)
-                
-                with col1:
-                    current_rsi = stock_data['RSI'].iloc[-1]
-                    st.metric("RSI (14)", f"{current_rsi:.1f}")
-                    if current_rsi < 30:
-                        st.success("Oversold")
-                    elif current_rsi > 70:
-                        st.warning("Overbought")
+                if not stock_data.empty:
+                    # Prepare and clean data
+                    stock_data = prepare_stock_data(stock_data)
+                    
+                    if stock_data is not None:
+                        # Calculate technical indicators
+                        stock_data = calculate_technical_indicators(stock_data)
+                        
+                        # Display Key Metrics
+                        st.subheader("📈 Key Metrics")
+                        col1, col2, col3, col4 = st.columns(4)
+                        
+                        current_price = stock_data['close'].iloc[-1]
+                        prev_close = stock_data['close'].iloc[-2] if len(stock_data) > 1 else current_price
+                        change = current_price - prev_close
+                        change_pct = (change / prev_close) * 100
+                        
+                        with col1:
+                            st.metric(
+                                "Current Price", 
+                                f"₹{current_price:.2f}",
+                                f"{change:+.2f} ({change_pct:+.2f}%)"
+                            )
+                        
+                        with col2:
+                            week_high = stock_data['high'].tail(5).max() if 'high' in stock_data.columns else current_price
+                            st.metric("5-Day High", f"₹{week_high:.2f}")
+                        
+                        with col3:
+                            week_low = stock_data['low'].tail(5).min() if 'low' in stock_data.columns else current_price
+                            st.metric("5-Day Low", f"₹{week_low:.2f}")
+                        
+                        with col4:
+                            if 'volume' in stock_data.columns:
+                                volume = stock_data['volume'].iloc[-1]
+                                avg_volume = stock_data['volume'].tail(20).mean()
+                                volume_ratio = volume / avg_volume if avg_volume > 0 else 1
+                                st.metric("Volume", f"{volume:,.0f}", f"{volume_ratio:.1f}x avg")
+                            else:
+                                st.metric("Volume", "N/A")
+                        
+                        # Price Chart
+                        st.subheader("📊 Price Chart with Indicators")
+                        
+                        fig = go.Figure()
+                        
+                        # Candlestick (if we have OHLC data)
+                        if all(col in stock_data.columns for col in ['open', 'high', 'low', 'close']):
+                            fig.add_trace(go.Candlestick(
+                                x=stock_data.index,
+                                open=stock_data['open'],
+                                high=stock_data['high'],
+                                low=stock_data['low'],
+                                close=stock_data['close'],
+                                name="Price"
+                            ))
+                        else:
+                            # Line chart if candlestick data not available
+                            fig.add_trace(go.Scatter(
+                                x=stock_data.index,
+                                y=stock_data['close'],
+                                name="Price",
+                                line=dict(color='blue', width=2)
+                            ))
+                        
+                        # Moving Averages
+                        if 'SMA_20' in stock_data.columns:
+                            fig.add_trace(go.Scatter(
+                                x=stock_data.index,
+                                y=stock_data['SMA_20'],
+                                name="SMA 20",
+                                line=dict(color='orange', width=2)
+                            ))
+                        
+                        if 'SMA_50' in stock_data.columns:
+                            fig.add_trace(go.Scatter(
+                                x=stock_data.index,
+                                y=stock_data['SMA_50'],
+                                name="SMA 50",
+                                line=dict(color='red', width=2)
+                            ))
+                        
+                        fig.update_layout(
+                            title=f"{selected_stock} - Technical Analysis",
+                            xaxis_title="Date",
+                            yaxis_title="Price (₹)",
+                            height=500,
+                            showlegend=True,
+                            template="plotly_white"
+                        )
+                        
+                        st.plotly_chart(fig, use_container_width=True)
+                        
+                        # Technical Indicators
+                        st.subheader("🔧 Technical Indicators")
+                        
+                        col1, col2, col3, col4 = st.columns(4)
+                        
+                        with col1:
+                            if 'RSI' in stock_data.columns:
+                                current_rsi = stock_data['RSI'].iloc[-1]
+                                st.metric("RSI (14)", f"{current_rsi:.1f}")
+                                if current_rsi < 30:
+                                    st.success("Oversold")
+                                elif current_rsi > 70:
+                                    st.warning("Overbought")
+                                else:
+                                    st.info("Neutral")
+                            else:
+                                st.metric("RSI", "Calculating...")
+                        
+                        with col2:
+                            if 'MACD' in stock_data.columns:
+                                current_macd = stock_data['MACD'].iloc[-1]
+                                st.metric("MACD", f"{current_macd:.2f}")
+                                if current_macd > 0:
+                                    st.success("Bullish")
+                                else:
+                                    st.warning("Bearish")
+                            else:
+                                st.metric("MACD", "Calculating...")
+                        
+                        with col3:
+                            if all(col in stock_data.columns for col in ['BB_Upper', 'BB_Lower']):
+                                bb_position = (current_price - stock_data['BB_Lower'].iloc[-1]) / (
+                                    stock_data['BB_Upper'].iloc[-1] - stock_data['BB_Lower'].iloc[-1])
+                                st.metric("BB Position", f"{bb_position:.1%}")
+                                if bb_position < 0.2:
+                                    st.success("Near Lower Band")
+                                elif bb_position > 0.8:
+                                    st.warning("Near Upper Band")
+                            else:
+                                st.metric("BB Position", "Calculating...")
+                        
+                        with col4:
+                            if all(col in stock_data.columns for col in ['SMA_20', 'SMA_50']):
+                                trend = "Bullish" if current_price > stock_data['SMA_20'].iloc[-1] > stock_data['SMA_50'].iloc[-1] else "Bearish"
+                                st.metric("Trend", trend)
+                            else:
+                                st.metric("Trend", "Analyzing...")
+                        
+                        # Store data for other tabs
+                        st.session_state.stock_data = stock_data
+                        st.session_state.current_price = current_price
+                        st.session_state.analysis_done = True
+                        
                     else:
-                        st.info("Neutral")
-                
-                with col2:
-                    current_macd = stock_data['MACD'].iloc[-1]
-                    st.metric("MACD", f"{current_macd:.2f}")
-                    if current_macd > 0:
-                        st.success("Bullish")
-                    else:
-                        st.warning("Bearish")
-                
-                with col3:
-                    bb_position = (current_price - stock_data['BB_Lower'].iloc[-1]) / (
-                        stock_data['BB_Upper'].iloc[-1] - stock_data['BB_Lower'].iloc[-1])
-                    st.metric("BB Position", f"{bb_position:.1%}")
-                    if bb_position < 0.2:
-                        st.success("Near Lower Band")
-                    elif bb_position > 0.8:
-                        st.warning("Near Upper Band")
-                
-                with col4:
-                    trend = "Bullish" if current_price > stock_data['SMA_20'].iloc[-1] > stock_data['SMA_50'].iloc[-1] else "Bearish"
-                    st.metric("Trend", trend)
-                
-                # Store data for other tabs
-                st.session_state.stock_data = stock_data
-                st.session_state.current_price = current_price
-                
-            else:
-                st.error("❌ Could not fetch data for the selected stock. Please try again.")
+                        st.error("❌ Could not process stock data. Please try again.")
+                else:
+                    st.error("❌ Could not fetch data for the selected stock. Please try again.")
+                    
+            except Exception as e:
+                st.error(f"❌ Error fetching data: {str(e)}")
+                st.info("💡 Tip: This might be a temporary issue. Please try again in a few moments.")
 
 with tab2:
     st.header("🎯 AI Trading Signals")
     
-    if 'stock_data' not in st.session_state:
+    if 'analysis_done' not in st.session_state or not st.session_state.analysis_done:
         st.warning("⚠️ Please run analysis in the 'Live Analysis' tab first.")
     else:
         stock_data = st.session_state.stock_data
@@ -486,28 +529,6 @@ with tab2:
                     st.warning("⚠️ High risk per trade detected. Consider reducing to 2-3% for better risk management.")
                 else:
                     st.success("✅ Good risk management practice.")
-                
-                if shares * current_price > initial_capital * 0.2:
-                    st.warning("⚠️ Position size exceeds 20% of portfolio. Consider reducing position.")
-                
-                # Trading Psychology
-                with st.expander("🧠 Trading Psychology Tips"):
-                    st.markdown("""
-                    **For BUY Signals:**
-                    - Wait for confirmation with volume
-                    - Scale into position gradually
-                    - Have a clear exit strategy
-                    
-                    **For SELL Signals:**
-                    - Don't let emotions override the signal
-                    - Consider tax implications
-                    - Review your overall portfolio strategy
-                    
-                    **Always Remember:**
-                    - No signal is 100% accurate
-                    - Manage your position sizes
-                    - Use stop losses religiously
-                    """)
 
 with tab3:
     st.header("🤖 AI Model Comparison")
@@ -517,15 +538,28 @@ with tab3:
     # Model comparison chart
     models = list(AI_MODELS.keys())
     accuracies = [AI_MODELS[model]["accuracy"] for model in models]
-    speeds = ["Very Fast" if "Simple" in model else AI_MODELS[model]["speed"] for model in models]
     
     # Create comparison dataframe
     comparison_df = pd.DataFrame({
         'Model': models,
         'Accuracy': accuracies,
-        'Speed': speeds,
+        'Speed': [AI_MODELS[model]["speed"] for model in models],
         'Risk': [AI_MODELS[model]["risk"] for model in models]
     })
+    
+    # Display model comparison chart
+    fig = px.bar(
+        comparison_df, 
+        x='Accuracy', 
+        y='Model',
+        orientation='h',
+        color='Accuracy',
+        color_continuous_scale='Viridis',
+        title='AI Model Accuracy Comparison'
+    )
+    
+    fig.update_layout(height=400)
+    st.plotly_chart(fig, use_container_width=True)
     
     # Display model cards
     for model in models:
@@ -550,55 +584,11 @@ with tab3:
                 st.info("**Combines multiple AI techniques** for maximum accuracy and robustness.")
             else:
                 st.info("**Simple moving average strategy** - fast and reliable for trend following.")
-    
-    # Performance comparison chart
-    st.subheader("📊 Model Performance Comparison")
-    
-    fig = px.bar(
-        comparison_df, 
-        x='Accuracy', 
-        y='Model',
-        orientation='h',
-        color='Accuracy',
-        color_continuous_scale='Viridis'
-    )
-    
-    fig.update_layout(
-        title='AI Model Accuracy Comparison',
-        xaxis_title='Accuracy (%)',
-        yaxis_title='Model',
-        height=400
-    )
-    
-    st.plotly_chart(fig, use_container_width=True)
-    
-    # Model selection advice
-    st.subheader("🎯 Model Selection Guide")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("""
-        **Choose LSTM/Hybrid if:**
-        - You want highest accuracy
-        - Processing speed isn't critical
-        - You're trading with larger capital
-        - Market conditions are complex
-        """)
-    
-    with col2:
-        st.markdown("""
-        **Choose Simple MA if:**
-        - You need fastest execution
-        - You're starting with algorithmic trading
-        - Market is trending clearly
-        - You prefer simplicity
-        """)
 
 with tab4:
     st.header("📈 Strategy Backtesting")
     
-    if 'stock_data' not in st.session_state:
+    if 'analysis_done' not in st.session_state or not st.session_state.analysis_done:
         st.warning("⚠️ Please run analysis in the 'Live Analysis' tab first.")
     else:
         stock_data = st.session_state.stock_data
@@ -610,13 +600,13 @@ with tab4:
                 
                 # Calculate performance metrics
                 total_return = (portfolio_values[-1] - initial_capital) / initial_capital * 100
-                volatility = returns.std() * np.sqrt(252) * 100  # Annualized
-                sharpe_ratio = (returns.mean() / returns.std()) * np.sqrt(252) if returns.std() > 0 else 0
+                volatility = returns.std() * np.sqrt(252) * 100 if len(returns) > 0 else 0
+                sharpe_ratio = (returns.mean() / returns.std()) * np.sqrt(252) if len(returns) > 0 and returns.std() > 0 else 0
                 
                 # Maximum Drawdown
                 peak = np.maximum.accumulate(portfolio_values)
                 drawdown = (portfolio_values - peak) / peak * 100
-                max_drawdown = np.min(drawdown)
+                max_drawdown = np.min(drawdown) if len(drawdown) > 0 else 0
                 
                 # Display metrics
                 st.subheader("📊 Backtest Results")
@@ -646,35 +636,6 @@ with tab4:
                 ax.grid(True, alpha=0.3)
                 
                 st.pyplot(fig)
-                
-                # Drawdown chart
-                st.subheader("📉 Drawdown Analysis")
-                
-                fig, ax = plt.subplots(figsize=(10, 4))
-                ax.fill_between(range(len(drawdown)), drawdown, 0, alpha=0.3, color='red')
-                ax.plot(drawdown, color='red', linewidth=1)
-                ax.set_title('Portfolio Drawdown')
-                ax.set_ylabel('Drawdown (%)')
-                ax.set_xlabel('Trading Periods')
-                ax.grid(True, alpha=0.3)
-                
-                st.pyplot(fig)
-                
-                # Performance insights
-                st.subheader("💡 Performance Insights")
-                
-                if total_return > 20:
-                    st.success("🎉 Excellent performance! The strategy shows strong potential.")
-                elif total_return > 10:
-                    st.info("📈 Good performance. The strategy is working well.")
-                else:
-                    st.warning("⚠️ Moderate performance. Consider adjusting parameters or trying different models.")
-                
-                if max_drawdown < -10:
-                    st.warning("⚠️ High maximum drawdown. Consider adding better risk management.")
-                
-                if sharpe_ratio > 1.5:
-                    st.success("✅ Excellent risk-adjusted returns (Sharpe Ratio > 1.5)")
 
 with tab5:
     st.header("ℹ️ System Information")
@@ -695,18 +656,7 @@ with tab5:
     - Streamlit (Web Framework)
     - Yahoo Finance API (Market Data)
     - Plotly (Interactive Charts)
-    - Scikit-learn & TensorFlow (AI Models)
-    """)
-    
-    st.subheader("📋 How to Use")
-    
-    st.markdown("""
-    1. **Select a stock** from the sidebar
-    2. **Choose an AI model** based on your preference
-    3. **Set your trading parameters** (capital, risk tolerance)
-    4. **Run analysis** in the Live Analysis tab
-    5. **Generate trading signals** in the Trading Signals tab
-    6. **Backtest strategies** to validate performance
+    - Pandas & NumPy (Data Analysis)
     """)
     
     st.subheader("⚠️ Important Disclaimer")
@@ -722,55 +672,6 @@ with tab5:
     Always consult with qualified financial advisors before making investment decisions.
     Only trade with capital you can afford to lose.
     """)
-    
-    st.subheader("🔧 Technical Details")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("""
-        **Data Sources:**
-        - Yahoo Finance API
-        - Real-time stock data
-        - Historical price data
-        
-        **AI Models:**
-        - LSTM Neural Networks
-        - Random Forest Ensemble
-        - XGBoost
-        - Hybrid Approaches
-        - Technical Strategies
-        """)
-    
-    with col2:
-        st.markdown("""
-        **Features:**
-        - Real-time analysis
-        - Multiple timeframes
-        - Risk management
-        - Performance tracking
-        - Interactive charts
-        
-        **Compatibility:**
-        - 100% web-based
-        - Mobile responsive
-        - No installation needed
-        - Free to use
-        """)
-    
-    # System status
-    st.subheader("🟢 System Status")
-    
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.success("API: Connected")
-    with col2:
-        st.success("Data: Live")
-    with col3:
-        st.success("Models: Loaded")
-    with col4:
-        st.success("Analysis: Ready")
 
 # Footer
 st.markdown("---")
