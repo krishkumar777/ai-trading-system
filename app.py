@@ -1,4 +1,4 @@
-# app.py - Fixed Version for Streamlit Cloud
+# app.py - Final Fixed Version for Streamlit Cloud
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -8,6 +8,10 @@ import plotly.express as px
 import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
 import time
+import warnings
+
+# Suppress future warnings
+warnings.filterwarnings('ignore', category=FutureWarning)
 
 # Page configuration
 st.set_page_config(
@@ -61,6 +65,20 @@ st.markdown("""
         text-align: center;
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
     }
+    .success-box {
+        background-color: #d4edda;
+        border: 1px solid #c3e6cb;
+        border-radius: 5px;
+        padding: 15px;
+        margin: 10px 0;
+    }
+    .warning-box {
+        background-color: #fff3cd;
+        border: 1px solid #ffeaa7;
+        border-radius: 5px;
+        padding: 15px;
+        margin: 10px 0;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -86,7 +104,9 @@ INDIAN_STOCKS = {
     "BHARTI AIRTEL": "BHARTIARTL.NS",
     "ITC LIMITED": "ITC.NS",
     "LARSEN & TOUBRO": "LT.NS",
-    "KOTAK BANK": "KOTAKBANK.NS"
+    "KOTAK BANK": "KOTAKBANK.NS",
+    "AXIS BANK": "AXISBANK.NS",
+    "BAJAJ FINANCE": "BAJFINANCE.NS"
 }
 
 selected_stock = st.sidebar.selectbox(
@@ -120,151 +140,170 @@ period = st.sidebar.selectbox("Data Period:", ["1mo", "3mo", "6mo", "1y", "2y", 
 # Utility Functions
 def prepare_stock_data(df):
     """Prepare and clean stock data from yfinance"""
-    # If MultiIndex columns, flatten them
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = ['_'.join(col).strip() for col in df.columns]
-    
-    # Ensure we have the required columns
-    required_columns = {
-        'close': ['Close', 'close', 'Adj Close', 'Adj_Close'],
-        'open': ['Open', 'open'],
-        'high': ['High', 'high'],
-        'low': ['Low', 'low'],
-        'volume': ['Volume', 'volume']
-    }
-    
-    # Map columns to standard names
-    column_mapping = {}
-    for standard_name, possible_names in required_columns.items():
-        for possible in possible_names:
-            if possible in df.columns:
-                column_mapping[possible] = standard_name
-                break
-    
-    # Rename columns
-    df = df.rename(columns=column_mapping)
-    
-    # Ensure we have at least the close price
-    if 'close' not in df.columns:
-        st.error("❌ Could not find price data in the downloaded data")
+    try:
+        # If MultiIndex columns, flatten them
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = ['_'.join(col).strip() for col in df.columns]
+        
+        # Ensure we have the required columns
+        required_columns = {
+            'close': ['Close', 'close', 'Adj Close', 'Adj_Close'],
+            'open': ['Open', 'open'],
+            'high': ['High', 'high'],
+            'low': ['Low', 'low'],
+            'volume': ['Volume', 'volume']
+        }
+        
+        # Map columns to standard names
+        column_mapping = {}
+        for standard_name, possible_names in required_columns.items():
+            for possible in possible_names:
+                if possible in df.columns:
+                    column_mapping[possible] = standard_name
+                    break
+        
+        # Rename columns
+        df = df.rename(columns=column_mapping)
+        
+        # Ensure we have at least the close price
+        if 'close' not in df.columns:
+            st.error("❌ Could not find price data in the downloaded data")
+            return None
+        
+        return df
+        
+    except Exception as e:
+        st.error(f"❌ Error preparing data: {str(e)}")
         return None
-    
-    return df
 
 def calculate_technical_indicators(df):
     """Calculate technical indicators for the stock"""
-    # Make a copy to avoid modifying original
-    df_tech = df.copy()
-    
-    # Ensure we have the required columns
-    if 'close' not in df_tech.columns:
-        st.error("❌ Missing close price data")
+    try:
+        # Make a copy to avoid modifying original
+        df_tech = df.copy()
+        
+        # Ensure we have the required columns
+        if 'close' not in df_tech.columns:
+            return df_tech
+        
+        # Calculate basic indicators only if we have enough data
+        if len(df_tech) >= 20:
+            # Moving Averages
+            df_tech['SMA_20'] = df_tech['close'].rolling(window=20, min_periods=1).mean()
+            df_tech['SMA_50'] = df_tech['close'].rolling(window=50, min_periods=1).mean()
+            df_tech['EMA_12'] = df_tech['close'].ewm(span=12, min_periods=1).mean()
+            df_tech['EMA_26'] = df_tech['close'].ewm(span=26, min_periods=1).mean()
+            
+            # RSI
+            delta = df_tech['close'].diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=14, min_periods=1).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=14, min_periods=1).mean()
+            rs = gain / loss
+            df_tech['RSI'] = 100 - (100 / (1 + rs))
+            
+            # MACD
+            df_tech['MACD'] = df_tech['EMA_12'] - df_tech['EMA_26']
+            df_tech['MACD_Signal'] = df_tech['MACD'].ewm(span=9, min_periods=1).mean()
+            df_tech['MACD_Histogram'] = df_tech['MACD'] - df_tech['MACD_Signal']
+            
+            # Bollinger Bands
+            df_tech['BB_Middle'] = df_tech['close'].rolling(window=20, min_periods=1).mean()
+            bb_std = df_tech['close'].rolling(window=20, min_periods=1).std()
+            df_tech['BB_Upper'] = df_tech['BB_Middle'] + (bb_std * 2)
+            df_tech['BB_Lower'] = df_tech['BB_Middle'] - (bb_std * 2)
+        
         return df_tech
-    
-    # Moving Averages
-    df_tech['SMA_20'] = df_tech['close'].rolling(window=20).mean()
-    df_tech['SMA_50'] = df_tech['close'].rolling(window=50).mean()
-    df_tech['EMA_12'] = df_tech['close'].ewm(span=12).mean()
-    df_tech['EMA_26'] = df_tech['close'].ewm(span=26).mean()
-    
-    # RSI
-    delta = df_tech['close'].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-    rs = gain / loss
-    df_tech['RSI'] = 100 - (100 / (1 + rs))
-    
-    # MACD
-    df_tech['MACD'] = df_tech['EMA_12'] - df_tech['EMA_26']
-    df_tech['MACD_Signal'] = df_tech['MACD'].ewm(span=9).mean()
-    df_tech['MACD_Histogram'] = df_tech['MACD'] - df_tech['MACD_Signal']
-    
-    # Bollinger Bands
-    df_tech['BB_Middle'] = df_tech['close'].rolling(window=20).mean()
-    bb_std = df_tech['close'].rolling(window=20).std()
-    df_tech['BB_Upper'] = df_tech['BB_Middle'] + (bb_std * 2)
-    df_tech['BB_Lower'] = df_tech['BB_Middle'] - (bb_std * 2)
-    
-    return df_tech
+        
+    except Exception as e:
+        st.error(f"❌ Error calculating indicators: {str(e)}")
+        return df
 
 def generate_trading_signal(df, model_type):
     """Generate trading signal based on technical analysis and AI model"""
-    if len(df) == 0:
+    try:
+        if len(df) == 0:
+            return 0
+        
+        current_data = df.iloc[-1]
+        
+        # Base signal strength from technical indicators
+        signal_strength = 0
+        
+        # Price vs Moving Averages
+        if 'SMA_20' in current_data and 'SMA_50' in current_data:
+            if current_data['close'] > current_data['SMA_20'] > current_data['SMA_50']:
+                signal_strength += 0.3
+            elif current_data['close'] > current_data['SMA_20']:
+                signal_strength += 0.15
+            elif current_data['close'] < current_data['SMA_50']:
+                signal_strength -= 0.2
+        
+        # RSI Analysis
+        if 'RSI' in current_data and not pd.isna(current_data['RSI']):
+            if current_data['RSI'] < 30:
+                signal_strength += 0.2  # Oversold - bullish
+            elif current_data['RSI'] > 70:
+                signal_strength -= 0.2  # Overbought - bearish
+        
+        # MACD Analysis
+        if 'MACD' in current_data and 'MACD_Signal' in current_data:
+            if not pd.isna(current_data['MACD']) and not pd.isna(current_data['MACD_Signal']):
+                if current_data['MACD'] > current_data['MACD_Signal']:
+                    signal_strength += 0.15
+                else:
+                    signal_strength -= 0.1
+        
+        # Volume analysis (if available)
+        if 'volume' in df.columns:
+            volume_avg = df['volume'].rolling(20).mean().iloc[-1] if len(df) > 20 else df['volume'].mean()
+            if current_data['volume'] > volume_avg * 1.5:
+                signal_strength += 0.1
+        
+        # Model-specific adjustments
+        if "LSTM" in model_type or "Hybrid" in model_type:
+            signal_strength += 0.1  # Advanced models get bonus
+        elif "Simple" in model_type:
+            signal_strength -= 0.05  # Simple models are more conservative
+        
+        return signal_strength
+        
+    except Exception as e:
+        st.error(f"❌ Error generating signal: {str(e)}")
         return 0
-    
-    current_data = df.iloc[-1]
-    
-    # Base signal strength from technical indicators
-    signal_strength = 0
-    
-    # Price vs Moving Averages
-    if 'SMA_20' in current_data and 'SMA_50' in current_data:
-        if current_data['close'] > current_data['SMA_20'] > current_data['SMA_50']:
-            signal_strength += 0.3
-        elif current_data['close'] > current_data['SMA_20']:
-            signal_strength += 0.15
-        elif current_data['close'] < current_data['SMA_50']:
-            signal_strength -= 0.2
-    
-    # RSI Analysis
-    if 'RSI' in current_data:
-        if current_data['RSI'] < 30:
-            signal_strength += 0.2  # Oversold - bullish
-        elif current_data['RSI'] > 70:
-            signal_strength -= 0.2  # Overbought - bearish
-    
-    # MACD Analysis
-    if 'MACD' in current_data and 'MACD_Signal' in current_data:
-        if current_data['MACD'] > current_data['MACD_Signal']:
-            signal_strength += 0.15
-        else:
-            signal_strength -= 0.1
-    
-    # Volume analysis (if available)
-    if 'volume' in df.columns:
-        volume_avg = df['volume'].rolling(20).mean().iloc[-1] if len(df) > 20 else df['volume'].mean()
-        if current_data['volume'] > volume_avg * 1.5:
-            signal_strength += 0.1
-    
-    # Model-specific adjustments
-    if "LSTM" in model_type or "Hybrid" in model_type:
-        signal_strength += 0.1  # Advanced models get bonus
-    elif "Simple" in model_type:
-        signal_strength -= 0.05  # Simple models are more conservative
-    
-    return signal_strength
 
 def simulate_backtest(df, initial_capital, model_type):
     """Simulate backtesting performance"""
-    if 'close' not in df.columns or len(df) < 2:
+    try:
+        if 'close' not in df.columns or len(df) < 2:
+            return [initial_capital], pd.Series([0])
+        
+        returns = df['close'].pct_change().dropna()
+        
+        if len(returns) == 0:
+            return [initial_capital], pd.Series([0])
+        
+        # Model-specific performance simulation
+        if "LSTM" in model_type or "Hybrid" in model_type:
+            simulated_returns = returns * np.random.uniform(1.1, 1.3, len(returns))
+        elif "XGBoost" in model_type or "Random Forest" in model_type:
+            simulated_returns = returns * np.random.uniform(1.0, 1.2, len(returns))
+        else:
+            simulated_returns = returns * np.random.uniform(0.8, 1.1, len(returns))
+        
+        # Add some random noise
+        noise = np.random.normal(0, returns.std() * 0.1, len(returns))
+        simulated_returns = simulated_returns + noise
+        
+        # Calculate portfolio values
+        portfolio_values = [initial_capital]
+        for ret in simulated_returns:
+            portfolio_values.append(portfolio_values[-1] * (1 + ret))
+        
+        return portfolio_values, simulated_returns
+        
+    except Exception as e:
+        st.error(f"❌ Error in backtest: {str(e)}")
         return [initial_capital], pd.Series([0])
-    
-    returns = df['close'].pct_change().dropna()
-    
-    if len(returns) == 0:
-        return [initial_capital], pd.Series([0])
-    
-    # Model-specific performance simulation
-    if "LSTM" in model_type or "Hybrid" in model_type:
-        simulated_returns = returns * np.random.uniform(1.1, 1.3, len(returns))
-        volatility_multiplier = 0.8
-    elif "XGBoost" in model_type or "Random Forest" in model_type:
-        simulated_returns = returns * np.random.uniform(1.0, 1.2, len(returns))
-        volatility_multiplier = 0.9
-    else:
-        simulated_returns = returns * np.random.uniform(0.8, 1.1, len(returns))
-        volatility_multiplier = 1.0
-    
-    # Add some random noise and model-specific characteristics
-    noise = np.random.normal(0, returns.std() * 0.1, len(returns))
-    simulated_returns = simulated_returns + noise
-    
-    # Calculate portfolio values
-    portfolio_values = [initial_capital]
-    for ret in simulated_returns:
-        portfolio_values.append(portfolio_values[-1] * (1 + ret))
-    
-    return portfolio_values, simulated_returns
 
 # Main Tabs
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
@@ -281,9 +320,14 @@ with tab1:
     if st.button("🚀 Analyze Now", type="primary", use_container_width=True):
         with st.spinner("📥 Downloading live market data..."):
             try:
-                # Get stock data
+                # Get stock data with explicit parameters to avoid warnings
                 stock_symbol = INDIAN_STOCKS[selected_stock]
-                stock_data = yf.download(stock_symbol, period=period, progress=False)
+                stock_data = yf.download(
+                    stock_symbol, 
+                    period=period, 
+                    progress=False,
+                    auto_adjust=True
+                )
                 
                 if not stock_data.empty:
                     # Prepare and clean data
@@ -384,7 +428,7 @@ with tab1:
                         col1, col2, col3, col4 = st.columns(4)
                         
                         with col1:
-                            if 'RSI' in stock_data.columns:
+                            if 'RSI' in stock_data.columns and not pd.isna(stock_data['RSI'].iloc[-1]):
                                 current_rsi = stock_data['RSI'].iloc[-1]
                                 st.metric("RSI (14)", f"{current_rsi:.1f}")
                                 if current_rsi < 30:
@@ -397,7 +441,7 @@ with tab1:
                                 st.metric("RSI", "Calculating...")
                         
                         with col2:
-                            if 'MACD' in stock_data.columns:
+                            if 'MACD' in stock_data.columns and not pd.isna(stock_data['MACD'].iloc[-1]):
                                 current_macd = stock_data['MACD'].iloc[-1]
                                 st.metric("MACD", f"{current_macd:.2f}")
                                 if current_macd > 0:
@@ -430,6 +474,8 @@ with tab1:
                         st.session_state.stock_data = stock_data
                         st.session_state.current_price = current_price
                         st.session_state.analysis_done = True
+                        
+                        st.success("✅ Analysis completed successfully!")
                         
                     else:
                         st.error("❌ Could not process stock data. Please try again.")
