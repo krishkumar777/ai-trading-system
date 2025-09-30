@@ -860,10 +860,10 @@ with tab4:
     
     st.subheader("⚠️ Important Disclaimer")
     
-    st.error(" ER"
+    st.error("""
     **CRITICAL RISK WARNING:** 
     
     This forecasting system is for **EDUCATIONAL AND RESEARCH PURPOSES ONLY**.
     
     - ❌ **NOT financial advice**
-    -
+     """)
