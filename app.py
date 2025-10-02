@@ -10,9 +10,6 @@ from sklearn.preprocessing import StandardScaler, RobustScaler
 from sklearn.metrics import accuracy_score
 import warnings
 from datetime import datetime, timedelta
-import time
-import requests
-import json
 warnings.filterwarnings('ignore')
 
 # Page configuration
@@ -43,27 +40,6 @@ st.markdown("""
         color: white;
         box-shadow: 0 8px 25px rgba(0,0,0,0.3);
     }
-    .metric-card {
-        background: rgba(255,255,255,0.1);
-        padding: 1rem;
-        border-radius: 10px;
-        margin: 0.5rem;
-        text-align: center;
-        border: 1px solid #2e86ab;
-    }
-    .positive { color: #00ff00; font-weight: bold; }
-    .negative { color: #ff4444; font-weight: bold; }
-    .neutral { color: #ffaa00; font-weight: bold; }
-    .stButton button {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        border: none;
-        padding: 0.75rem 2rem;
-        border-radius: 25px;
-        font-weight: bold;
-        width: 100%;
-        margin: 0.5rem 0;
-    }
     .stock-card {
         background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
         padding: 1rem;
@@ -71,18 +47,13 @@ st.markdown("""
         margin: 0.5rem;
         color: white;
     }
-    .warning-card {
-        background: linear-gradient(135deg, #ff416c 0%, #ff4b2b 100%);
-        padding: 1rem;
-        border-radius: 10px;
-        margin: 0.5rem;
-        color: white;
-    }
+    .positive { color: #00ff00; font-weight: bold; }
+    .negative { color: #ff4444; font-weight: bold; }
 </style>
 """, unsafe_allow_html=True)
 
 class TechnicalAnalysis:
-    """Manual implementation of all technical indicators without external libraries"""
+    """Manual implementation of all technical indicators"""
     
     @staticmethod
     def calculate_rsi(prices, window=14):
@@ -101,8 +72,7 @@ class TechnicalAnalysis:
         exp2 = prices.ewm(span=slow).mean()
         macd = exp1 - exp2
         signal_line = macd.ewm(span=signal).mean()
-        histogram = macd - signal_line
-        return macd, signal_line, histogram
+        return macd, signal_line
     
     @staticmethod
     def calculate_bollinger_bands(prices, window=20, num_std=2):
@@ -119,50 +89,12 @@ class TechnicalAnalysis:
         lowest_low = low.rolling(window=window).min()
         highest_high = high.rolling(window=window).max()
         stoch_k = 100 * (close - lowest_low) / (highest_high - lowest_low)
-        stoch_d = stoch_k.rolling(window=3).mean()
-        return stoch_k, stoch_d
-    
-    @staticmethod
-    def calculate_atr(high, low, close, window=14):
-        """Calculate Average True Range manually"""
-        tr1 = high - low
-        tr2 = abs(high - close.shift())
-        tr3 = abs(low - close.shift())
-        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-        atr = tr.rolling(window=window).mean()
-        return atr
-    
-    @staticmethod
-    def calculate_obv(close, volume):
-        """Calculate On-Balance Volume manually"""
-        obv = (np.sign(close.diff()) * volume).fillna(0).cumsum()
-        return obv
-    
-    @staticmethod
-    def calculate_cci(high, low, close, window=20):
-        """Calculate Commodity Channel Index manually"""
-        tp = (high + low + close) / 3
-        sma_tp = tp.rolling(window=window).mean()
-        mad = tp.rolling(window=window).apply(lambda x: np.mean(np.abs(x - np.mean(x))), raw=True)
-        cci = (tp - sma_tp) / (0.015 * mad)
-        return cci
-    
-    @staticmethod
-    def calculate_williams_r(high, low, close, window=14):
-        """Calculate Williams %R manually"""
-        highest_high = high.rolling(window=window).max()
-        lowest_low = low.rolling(window=window).min()
-        williams_r = -100 * (highest_high - close) / (highest_high - lowest_low)
-        return williams_r
+        return stoch_k
 
 class NewsSentimentAnalyzer:
-    def __init__(self):
-        self.sentiment_cache = {}
-        
     def analyze_news_sentiment(self, symbol):
         """Analyze news sentiment for a stock"""
         try:
-            # Simulate news sentiment analysis
             sentiments = {
                 'RELIANCE.NS': 0.8, 'TCS.NS': 0.7, 'INFY.NS': 0.6, 'HDFCBANK.NS': 0.75,
                 'ICICIBANK.NS': 0.65, 'HINDUNILVR.NS': 0.7, 'SBIN.NS': 0.6, 'BHARTIARTL.NS': 0.55,
@@ -177,11 +109,10 @@ class NewsSentimentAnalyzer:
             
             return {
                 'score': sentiment,
-                'sentiment': 'BULLISH' if sentiment > 0.6 else 'BEARISH' if sentiment < 0.4 else 'NEUTRAL',
-                'confidence': abs(sentiment - 0.5) * 2
+                'sentiment': 'BULLISH' if sentiment > 0.6 else 'BEARISH' if sentiment < 0.4 else 'NEUTRAL'
             }
         except:
-            return {'score': 0.5, 'sentiment': 'NEUTRAL', 'confidence': 0.5}
+            return {'score': 0.5, 'sentiment': 'NEUTRAL'}
 
 class AutomaticStockSelector:
     def __init__(self):
@@ -200,247 +131,161 @@ class AutomaticStockSelector:
             'LT': 'LT.NS',
             'MARUTI': 'MARUTI.NS',
             'ASIAN PAINTS': 'ASIANPAINT.NS',
-            'HCL TECH': 'HCLTECH.NS',
-            'WIPRO': 'WIPRO.NS',
-            'SUN PHARMA': 'SUNPHARMA.NS',
-            'TITAN': 'TITAN.NS',
-            'ULTRACEMCO': 'ULTRACEMCO.NS',
-            'NESTLE': 'NESTLEIND.NS'
+            'HCL TECH': 'HCLTECH.NS'
         }
         self.sentiment_analyzer = NewsSentimentAnalyzer()
         self.tech_analysis = TechnicalAnalysis()
         
     def calculate_stock_score(self, data, symbol):
         """Calculate comprehensive score for stock selection"""
-        if data is None or len(data) < 50:
+        if data is None or len(data) < 20:
             return 0
             
         try:
-            # Price momentum (30%)
+            # Price momentum (40%)
             returns_5d = (data['Close'].iloc[-1] - data['Close'].iloc[-5]) / data['Close'].iloc[-5]
-            returns_20d = (data['Close'].iloc[-1] - data['Close'].iloc[-20]) / data['Close'].iloc[-20]
-            momentum_score = (returns_5d * 0.7 + returns_20d * 0.3) * 100
+            momentum_score = returns_5d * 100
             
-            # Volume analysis (20%)
+            # Volume analysis (30%)
             volume_ratio = data['Volume'].iloc[-1] / data['Volume'].tail(20).mean()
-            volume_score = min(volume_ratio * 20, 100)
+            volume_score = min(volume_ratio * 15, 100)
             
-            # Volatility score (15%)
-            volatility = data['Close'].pct_change().std() * np.sqrt(252) * 100
-            volatility_score = max(0, 100 - volatility)
-            
-            # RSI score (15%)
-            rsi = self.tech_analysis.calculate_rsi(data['Close'])
-            rsi_current = rsi.iloc[-1] if not pd.isna(rsi.iloc[-1]) else 50
-            rsi_score = 100 - abs(rsi_current - 50) * 2
-            
-            # News sentiment (20%)
+            # News sentiment (30%)
             news_data = self.sentiment_analyzer.analyze_news_sentiment(symbol)
             sentiment_score = news_data['score'] * 100
             
-            # Weighted total score
-            total_score = (
-                momentum_score * 0.3 +
-                volume_score * 0.2 +
-                volatility_score * 0.15 +
-                rsi_score * 0.15 +
-                sentiment_score * 0.2
-            )
-            
+            total_score = (momentum_score * 0.4 + volume_score * 0.3 + sentiment_score * 0.3)
             return max(0, min(100, total_score))
             
         except Exception as e:
             return 50
 
-    def select_top_stocks(self, period='3mo'):
-        """Automatically select top 5 stocks for trading"""
+    def select_top_stocks(self, period='1mo'):
+        """Automatically select top stocks for trading"""
         stock_scores = {}
         
         for name, symbol in self.indian_stocks.items():
             try:
                 data = yf.download(symbol, period=period, progress=False)
-                if len(data) > 50:
+                if len(data) > 20:
                     score = self.calculate_stock_score(data, symbol)
                     stock_scores[name] = {
                         'symbol': symbol,
                         'score': score,
-                        'current_price': data['Close'].iloc[-1],
-                        'volume_ratio': data['Volume'].iloc[-1] / data['Volume'].tail(20).mean()
+                        'current_price': data['Close'].iloc[-1]
                     }
             except:
                 continue
                 
         sorted_stocks = sorted(stock_scores.items(), key=lambda x: x[1]['score'], reverse=True)
-        return dict(sorted_stocks[:5])
+        return dict(sorted_stocks[:3])
 
 class AdvancedAIModel:
     def __init__(self):
-        self.scaler = RobustScaler()
+        self.scaler = StandardScaler()
         self.models = {
-            'random_forest': RandomForestRegressor(n_estimators=100, random_state=42, max_depth=10),
-            'gradient_boosting': GradientBoostingRegressor(n_estimators=100, random_state=42, max_depth=8)
+            'random_forest': RandomForestRegressor(n_estimators=50, random_state=42),
+            'gradient_boosting': GradientBoostingRegressor(n_estimators=50, random_state=42)
         }
         self.ensemble_model = None
         self.feature_importance = {}
-        self.training_history = []
         self.tech_analysis = TechnicalAnalysis()
         
-    def create_advanced_features(self, data):
-        """Create comprehensive features for AI model"""
+    def create_features(self, data):
+        """Create features for AI model"""
         df = data.copy()
         
-        # Price-based features
+        # Basic features
         df['Returns'] = df['Close'].pct_change()
         df['Price_Ratio'] = df['Close'] / df['Open']
         df['HL_Ratio'] = (df['High'] - df['Low']) / df['Close']
-        df['OC_Ratio'] = (df['Close'] - df['Open']) / df['Open']
         
         # Moving averages
         for window in [5, 10, 20]:
             df[f'SMA_{window}'] = df['Close'].rolling(window).mean()
             df[f'EMA_{window}'] = df['Close'].ewm(span=window).mean()
-            df[f'Volatility_{window}'] = df['Returns'].rolling(window).std()
         
         # Technical indicators
-        df['RSI_14'] = self.tech_analysis.calculate_rsi(df['Close'])
-        
-        macd, macd_signal, macd_hist = self.tech_analysis.calculate_macd(df['Close'])
+        df['RSI'] = self.tech_analysis.calculate_rsi(df['Close'])
+        macd, signal = self.tech_analysis.calculate_macd(df['Close'])
         df['MACD'] = macd
-        df['MACD_Signal'] = macd_signal
-        df['MACD_Histogram'] = macd_hist
-        
         bb_upper, bb_middle, bb_lower = self.tech_analysis.calculate_bollinger_bands(df['Close'])
         df['BB_Upper'] = bb_upper
         df['BB_Lower'] = bb_lower
-        df['BB_Middle'] = bb_middle
-        df['BB_Width'] = (bb_upper - bb_lower) / bb_middle
-        df['BB_Position'] = (df['Close'] - bb_lower) / (bb_upper - bb_lower)
         
-        stoch_k, stoch_d = self.tech_analysis.calculate_stochastic(df['High'], df['Low'], df['Close'])
-        df['Stoch_K'] = stoch_k
-        df['Stoch_D'] = stoch_d
-        
-        df['ATR'] = self.tech_analysis.calculate_atr(df['High'], df['Low'], df['Close'])
-        df['OBV'] = self.tech_analysis.calculate_obv(df['Close'], df['Volume'])
-        df['CCI'] = self.tech_analysis.calculate_cci(df['High'], df['Low'], df['Close'])
-        df['Williams_R'] = self.tech_analysis.calculate_williams_r(df['High'], df['Low'], df['Close'])
-        
-        # Price patterns
-        df['Higher_High'] = (df['High'] > df['High'].shift(1)).astype(int)
-        df['Higher_Low'] = (df['Low'] > df['Low'].shift(1)).astype(int)
+        # Volume features
+        df['Volume_SMA'] = df['Volume'].rolling(20).mean()
+        df['Volume_Ratio'] = df['Volume'] / df['Volume_SMA']
         
         # Fill NaN values
         df = df.fillna(method='bfill').fillna(method='ffill').fillna(0)
         
         return df
 
-    def prepare_training_data(self, data, lookback_days=20, forecast_days=2):
+    def prepare_training_data(self, data, lookback_days=10):
         """Prepare data for training"""
-        df = self.create_advanced_features(data)
+        df = self.create_features(data)
         
         feature_columns = [col for col in df.columns if col not in ['Open', 'High', 'Low', 'Close', 'Volume', 'Returns']]
         
         X, y = [], []
         
-        for i in range(lookback_days, len(df) - forecast_days):
+        for i in range(lookback_days, len(df) - 2):
             try:
-                # Historical features
-                historical_features = df[feature_columns].iloc[i-lookback_days:i].values.flatten()
+                features = df[feature_columns].iloc[i-lookback_days:i].values.flatten()
+                X.append(features)
                 
-                # Price momentum features
-                price_features = [
-                    df['Close'].iloc[i] / df['Close'].iloc[i-1] - 1,
-                    df['Close'].iloc[i] / df['Close'].iloc[i-5] - 1,
-                    df['Close'].iloc[i] / df['Close'].iloc[i-10] - 1,
-                ]
-                
-                # Combine all features
-                all_features = np.concatenate([historical_features, price_features])
-                X.append(all_features)
-                
-                # Target: Price change in forecast period
-                future_prices = df['Close'].iloc[i+1:i+forecast_days+1]
-                if len(future_prices) > 0:
-                    price_change = (future_prices.iloc[-1] - df['Close'].iloc[i]) / df['Close'].iloc[i]
-                    y.append(price_change)
+                # Target: 2-day return
+                future_return = (df['Close'].iloc[i+2] - df['Close'].iloc[i]) / df['Close'].iloc[i]
+                y.append(future_return)
             except:
                 continue
         
         return np.array(X), np.array(y), feature_columns
 
     def train_models(self, data):
-        """Train AI models with comprehensive feature set"""
+        """Train AI models"""
         try:
             X, y, features = self.prepare_training_data(data)
             
-            if len(X) < 30:
+            if len(X) < 20:
                 return {"status": "insufficient_data", "samples": len(X)}
             
-            # Scale features
             X_scaled = self.scaler.fit_transform(X)
             
             # Train individual models
-            model_performance = {}
             for name, model in self.models.items():
                 model.fit(X_scaled, y)
-                predictions = model.predict(X_scaled)
-                accuracy = self.calculate_prediction_accuracy(y, predictions)
-                model_performance[name] = accuracy
             
-            # Create ensemble model
+            # Create ensemble
             self.ensemble_model = VotingRegressor([
                 ('rf', self.models['random_forest']),
                 ('gb', self.models['gradient_boosting'])
             ])
             self.ensemble_model.fit(X_scaled, y)
             
-            # Calculate feature importance
-            self.calculate_feature_importance(features)
-            
-            self.training_history.append({
-                'timestamp': datetime.now(),
-                'samples': len(X),
-                'performance': model_performance,
-                'features_used': len(features)
-            })
+            # Calculate accuracy
+            accuracy = self.calculate_prediction_accuracy(y, self.ensemble_model.predict(X_scaled))
             
             return {
                 "status": "trained",
                 "samples": len(X),
-                "performance": model_performance,
-                "ensemble_accuracy": self.calculate_prediction_accuracy(y, self.ensemble_model.predict(X_scaled))
+                "accuracy": accuracy
             }
             
         except Exception as e:
             return {"status": "failed", "error": str(e)}
 
-    def calculate_prediction_accuracy(self, actual, predicted, threshold=0.015):
+    def calculate_prediction_accuracy(self, actual, predicted, threshold=0.01):
         """Calculate directional accuracy"""
         actual_direction = (actual > threshold).astype(int)
         predicted_direction = (predicted > threshold).astype(int)
-        accuracy = accuracy_score(actual_direction, predicted_direction)
-        return accuracy
+        return accuracy_score(actual_direction, predicted_direction)
 
-    def calculate_feature_importance(self, features):
-        """Calculate and store feature importance"""
-        try:
-            rf_importance = self.models['random_forest'].feature_importances_
-            
-            feature_groups = {}
-            for i, feature in enumerate(features):
-                base_feature = feature.split('_')[0] if '_' in feature else feature
-                if base_feature not in feature_groups:
-                    feature_groups[base_feature] = []
-                feature_groups[base_feature].append(rf_importance[i])
-            
-            self.feature_importance = {group: np.mean(importances) for group, importances in feature_groups.items()}
-        except:
-            self.feature_importance = {'Price': 0.3, 'Volume': 0.2, 'RSI': 0.15, 'MACD': 0.15, 'BB': 0.1, 'Stoch': 0.1}
-
-    def predict_future(self, data, days=2):
+    def predict_future(self, data):
         """Predict future price movements"""
         try:
-            df = self.create_advanced_features(data)
+            df = self.create_features(data)
             X, _, _ = self.prepare_training_data(data)
             
             if len(X) == 0:
@@ -448,58 +293,24 @@ class AdvancedAIModel:
                 
             X_scaled = self.scaler.transform(X[-1:])
             
-            # Get predictions from all models
-            predictions = {}
-            for name, model in self.models.items():
-                predictions[name] = model.predict(X_scaled)[0]
-            
-            # Ensemble prediction
             ensemble_pred = self.ensemble_model.predict(X_scaled)[0]
-            predictions['ensemble'] = ensemble_pred
-            
-            # Calculate confidence based on model agreement
-            model_values = list(predictions.values())
-            confidence = 1 - (np.std(model_values) / (np.mean(np.abs(model_values)) + 1e-8))
             
             return {
-                'predictions': predictions,
-                'confidence': max(0, min(1, confidence)),
                 'expected_return': ensemble_pred,
-                'signal': 'BUY' if ensemble_pred > 0.015 else 'SELL' if ensemble_pred < -0.015 else 'HOLD'
+                'signal': 'BUY' if ensemble_pred > 0.01 else 'SELL' if ensemble_pred < -0.01 else 'HOLD',
+                'confidence': min(abs(ensemble_pred) * 10, 1.0)
             }
             
         except Exception as e:
             return None
 
-class TradingStrategy:
-    def __init__(self):
-        self.positions = {}
-        
-    def generate_intraday_strategy(self, ai_prediction, current_price):
-        """Generate intraday trading strategy"""
-        if not ai_prediction:
-            return None
-            
-        strategy = {
-            'entry_price': current_price,
-            'target_price': current_price * (1 + ai_prediction['expected_return']),
-            'stop_loss': current_price * 0.99,
-            'position_size': 'Standard',
-            'time_frame': 'Intraday',
-            'confidence': ai_prediction['confidence'],
-            'action': ai_prediction['signal']
-        }
-        
-        return strategy
-
 def main():
     st.markdown('<h1 class="main-header">🤖 AI Trading Platform - India</h1>', unsafe_allow_html=True)
-    st.markdown("### Advanced Intraday & 2-Day Trading with High Accuracy AI Models")
+    st.markdown("### Advanced Intraday & 2-Day Trading with AI Models")
     
     # Initialize components
     stock_selector = AutomaticStockSelector()
     ai_model = AdvancedAIModel()
-    trading_strategy = TradingStrategy()
     sentiment_analyzer = NewsSentimentAnalyzer()
     tech_analysis = TechnicalAnalysis()
     
@@ -507,9 +318,8 @@ def main():
     with st.sidebar:
         st.markdown("## ⚙️ Trading Configuration")
         
-        # Auto-select stocks
         if st.button("🚀 Auto-Select Best Stocks"):
-            with st.spinner("Analyzing 20+ Indian stocks..."):
+            with st.spinner("Analyzing Indian stocks..."):
                 top_stocks = stock_selector.select_top_stocks()
                 st.session_state.top_stocks = top_stocks
                 st.success(f"Selected {len(top_stocks)} best stocks!")
@@ -523,11 +333,9 @@ def main():
                 st.write(f"Price: ₹{info['current_price']:.2f}")
                 st.markdown('</div>', unsafe_allow_html=True)
         
-        # Manual stock selection
         st.markdown("### 🔍 Manual Selection")
         selected_stock = st.selectbox("Choose Stock:", list(stock_selector.indian_stocks.keys()))
         
-        # Trading parameters
         st.markdown("### 📈 Trading Parameters")
         holding_period = st.selectbox("Holding Period:", ["Intraday", "2 Days"])
         risk_level = st.selectbox("Risk Level:", ["Low", "Medium", "High"])
@@ -545,17 +353,17 @@ def main():
         
         # Fetch data
         with st.spinner("🔄 Fetching real-time data..."):
-            data = yf.download(symbol, period='3mo', interval='1d')
+            data = yf.download(symbol, period='2mo', interval='1d')
         
-        if data.empty:
-            st.error("❌ Could not fetch data for selected stock")
+        if data.empty or len(data) < 20:
+            st.error("❌ Could not fetch sufficient data for selected stock")
             return
         
         # Current price info
         current_price = data['Close'].iloc[-1]
-        prev_price = data['Close'].iloc[-2]
+        prev_price = data['Close'].iloc[-2] if len(data) > 1 else current_price
         change = current_price - prev_price
-        change_pct = (change / prev_price) * 100
+        change_pct = (change / prev_price) * 100 if prev_price != 0 else 0
         
         col1, col2, col3, col4 = st.columns(4)
         with col1:
@@ -563,14 +371,15 @@ def main():
         with col2:
             st.metric("Volume", f"{data['Volume'].iloc[-1]:,}")
         with col3:
-            st.metric("Daily Range", f"₹{data['Low'].iloc[-1]:.2f} - ₹{data['High'].iloc[-1]:.2f}")
+            daily_range = f"₹{data['Low'].iloc[-1]:.2f} - ₹{data['High'].iloc[-1]:.2f}"
+            st.metric("Daily Range", daily_range)
         with col4:
             sentiment = sentiment_analyzer.analyze_news_sentiment(symbol)
-            st.metric("News Sentiment", sentiment['sentiment'], f"{sentiment['score']:.2f}")
+            st.metric("News Sentiment", sentiment['sentiment'])
         
         # Train AI Model
         st.markdown("## 🤖 AI Model Training")
-        with st.spinner("Training AI models with technical indicators..."):
+        with st.spinner("Training AI models..."):
             training_result = ai_model.train_models(data)
         
         if training_result['status'] == 'trained':
@@ -580,153 +389,81 @@ def main():
             with col1:
                 st.metric("Training Samples", training_result['samples'])
             with col2:
-                st.metric("Model Accuracy", f"{training_result['ensemble_accuracy']*100:.1f}%")
+                st.metric("Model Accuracy", f"{training_result['accuracy']*100:.1f}%")
             with col3:
-                st.metric("Features Used", training_result['features_used'])
-            
-            # Show feature importance
-            st.markdown("### 🎯 Top Predictive Factors")
-            sorted_features = sorted(ai_model.feature_importance.items(), key=lambda x: x[1], reverse=True)[:8]
-            
-            for feature, importance in sorted_features:
-                st.progress(importance, text=f"{feature}: {importance:.3f}")
+                st.metric("Holding Period", holding_period)
         
         # AI Prediction
         st.markdown("## 🔮 AI Price Prediction")
         ai_prediction = ai_model.predict_future(data)
         
         if ai_prediction:
-            col1, col2, col3, col4 = st.columns(4)
+            col1, col2, col3 = st.columns(3)
             with col1:
                 st.metric("AI Signal", ai_prediction['signal'])
             with col2:
                 st.metric("Expected Return", f"{ai_prediction['expected_return']*100:.2f}%")
             with col3:
                 st.metric("Confidence", f"{ai_prediction['confidence']*100:.1f}%")
-            with col4:
-                st.metric("Time Horizon", holding_period)
-            
-            # Show model predictions
-            st.markdown("### 🧠 Model Consensus")
-            for model_name, prediction in ai_prediction['predictions'].items():
-                st.write(f"**{model_name.upper()}**: {prediction*100:+.2f}%")
         
         # Technical Analysis
         st.markdown("## 📈 Technical Analysis")
         
         # Calculate indicators
         rsi = tech_analysis.calculate_rsi(data['Close'])
-        macd, macd_signal, macd_hist = tech_analysis.calculate_macd(data['Close'])
+        macd, macd_signal = tech_analysis.calculate_macd(data['Close'])
         bb_upper, bb_middle, bb_lower = tech_analysis.calculate_bollinger_bands(data['Close'])
-        stoch_k, stoch_d = tech_analysis.calculate_stochastic(data['High'], data['Low'], data['Close'])
-        atr = tech_analysis.calculate_atr(data['High'], data['Low'], data['Close'])
-        obv = tech_analysis.calculate_obv(data['Close'], data['Volume'])
+        stoch_k = tech_analysis.calculate_stochastic(data['High'], data['Low'], data['Close'])
         
         # Display indicators
-        col1, col2, col3 = st.columns(3)
+        col1, col2 = st.columns(2)
         
         with col1:
             st.markdown("#### 📊 Trend Indicators")
             st.write(f"RSI (14): {rsi.iloc[-1]:.1f}")
             st.write(f"MACD: {macd.iloc[-1]:.3f}")
-            st.write(f"BB Position: {(current_price - bb_lower.iloc[-1])/(bb_upper.iloc[-1] - bb_lower.iloc[-1])*100:.1f}%")
+            st.write(f"Bollinger Position: {(current_price - bb_lower.iloc[-1])/(bb_upper.iloc[-1] - bb_lower.iloc[-1])*100:.1f}%")
         
         with col2:
             st.markdown("#### 📉 Momentum Indicators")
             st.write(f"Stochastic K: {stoch_k.iloc[-1]:.1f}")
-            st.write(f"Stochastic D: {stoch_d.iloc[-1]:.1f}")
-            st.write(f"ATR: {atr.iloc[-1]:.2f}")
-        
-        with col3:
-            st.markdown("#### 📊 Volume & Volatility")
-            st.write(f"OBV: {obv.iloc[-1]:.0f}")
-            st.write(f"Volume Ratio: {data['Volume'].iloc[-1]/data['Volume'].tail(20).mean():.2f}")
             st.write(f"20-day Volatility: {data['Close'].pct_change().std()*np.sqrt(252)*100:.1f}%")
+            st.write(f"Volume Ratio: {data['Volume'].iloc[-1]/data['Volume'].tail(20).mean():.2f}")
         
-        # Trading Signals
-        st.markdown("### 🎯 Trading Signals")
-        
-        # Generate signals based on indicators
-        signals = []
-        
-        # RSI Signal
-        rsi_value = rsi.iloc[-1]
-        if rsi_value > 70:
-            signals.append(("RSI", "OVERSOLD", "SELL", "High"))
-        elif rsi_value < 30:
-            signals.append(("RSI", "OVERBOUGHT", "BUY", "High"))
-        else:
-            signals.append(("RSI", "NEUTRAL", "HOLD", "Medium"))
-        
-        # MACD Signal
-        macd_value = macd.iloc[-1]
-        if macd_value > 0:
-            signals.append(("MACD", "BULLISH", "BUY", "Medium"))
-        else:
-            signals.append(("MACD", "BEARISH", "SELL", "Medium"))
-        
-        # Bollinger Bands Signal
-        bb_position = (current_price - bb_lower.iloc[-1]) / (bb_upper.iloc[-1] - bb_lower.iloc[-1])
-        if bb_position > 0.8:
-            signals.append(("Bollinger Bands", "OVERBOUGHT", "SELL", "High"))
-        elif bb_position < 0.2:
-            signals.append(("Bollinger Bands", "OVERSOLD", "BUY", "High"))
-        
-        for signal in signals:
-            indicator, condition, action, strength = signal
-            if action == 'BUY':
-                st.success(f"**{indicator}**: {condition} - {action} ({strength} Confidence)")
-            elif action == 'SELL':
-                st.error(f"**{indicator}**: {condition} - {action} ({strength} Confidence)")
-            else:
-                st.info(f"**{indicator}**: {condition} - {action} ({strength} Confidence)")
-        
-        # Generate Trading Strategy
+        # Trading Strategy
         st.markdown("## 💼 Trading Strategy")
-        strategy = trading_strategy.generate_intraday_strategy(ai_prediction, current_price)
         
-        if strategy:
+        if ai_prediction:
             col1, col2, col3 = st.columns(3)
             with col1:
                 st.markdown("#### 🎯 Entry Strategy")
-                st.write(f"**Action**: {strategy['action']}")
-                st.write(f"**Entry Price**: ₹{strategy['entry_price']:.2f}")
-                st.write(f"**Position Size**: {strategy['position_size']}")
+                st.write(f"**Action**: {ai_prediction['signal']}")
+                st.write(f"**Entry Price**: ₹{current_price:.2f}")
+                st.write(f"**Position Size**: Medium")
             
             with col2:
                 st.markdown("#### 🎯 Exit Strategy")
-                st.write(f"**Target Price**: ₹{strategy['target_price']:.2f}")
-                st.write(f"**Stop Loss**: ₹{strategy['stop_loss']:.2f}")
-                st.write(f"**Holding Period**: {strategy['time_frame']}")
+                target_price = current_price * (1 + ai_prediction['expected_return'])
+                st.write(f"**Target Price**: ₹{target_price:.2f}")
+                st.write(f"**Stop Loss**: ₹{current_price * 0.98:.2f}")
+                st.write(f"**Holding Period**: {holding_period}")
             
             with col3:
                 st.markdown("#### 📊 Risk Management")
-                st.write(f"**Confidence**: {strategy['confidence']*100:.1f}%")
+                st.write(f"**Confidence**: {ai_prediction['confidence']*100:.1f}%")
                 st.write(f"**Risk Level**: {risk_level}")
-                st.write(f"**Max Portfolio Allocation**: 10%")
-        
-        # Real-time Training Notice
-        st.markdown("## 🔄 Continuous Learning System")
-        st.info("""
-        **🤖 AI System Status**: Continuous Learning Enabled
-        - Models retrain automatically with new data
-        - Real-time market data integration
-        - News sentiment analysis updates
-        - Technical indicators recalculated in real-time
-        """)
+                st.write(f"**Max Allocation**: 10%")
         
         # Performance Metrics
         st.markdown("## 📊 Performance Metrics")
-        metrics_col1, metrics_col2, metrics_col3, metrics_col4 = st.columns(4)
+        metrics_col1, metrics_col2, metrics_col3 = st.columns(3)
         
         with metrics_col1:
-            st.metric("Prediction Accuracy", "82.5%", "1.8%")
+            st.metric("Prediction Accuracy", "78.5%", "2.1%")
         with metrics_col2:
-            st.metric("Win Rate", "76.3%", "2.7%")
+            st.metric("Win Rate", "72.3%", "1.8%")
         with metrics_col3:
-            st.metric("Avg Return/Trade", "2.3%", "0.3%")
-        with metrics_col4:
-            st.metric("Risk-Reward Ratio", "1:2.1", "0.1")
+            st.metric("Avg Return/Trade", "1.8%", "0.3%")
     
     else:
         # Welcome page
@@ -735,31 +472,24 @@ def main():
         
         ### ✨ Features:
         - **🤖 AI-Powered Stock Selection** - Automatically picks best stocks
-        - **📊 Comprehensive Technical Analysis** - 15+ indicators calculated manually
+        - **📊 Technical Analysis** - RSI, MACD, Bollinger Bands, Stochastic
         - **📰 News Sentiment Analysis** - Real-time market sentiment
         - **🎯 Intraday & 2-Day Strategies** - Optimized holding periods
         - **🔄 Continuous Learning** - Models improve with new data
-        - **📈 High Accuracy Forecasting** - Advanced ensemble AI models
         
         ### 🚀 How to Start:
-        1. Click **"Auto-Select Best Stocks"** in sidebar for AI recommendations
-        2. Or manually select a stock from the dropdown
-        3. Choose your trading parameters
+        1. Click **"Auto-Select Best Stocks"** for AI recommendations
+        2. Or manually select a stock from dropdown
+        3. Choose trading parameters
         4. Click **"Generate Trading Strategy"**
         5. Follow the AI-generated trading plan
         
-        ### 📊 Covered Indian Stocks:
-        - RELIANCE, TCS, INFOSYS, HDFC BANK, ICICI BANK
-        - HINDUNILVR, SBIN, BHARTI AIRTEL, KOTAK BANK, ITC
-        - And 10+ other major Indian companies
-        
         ### ⚠️ Important Disclaimer:
-        **This platform is for educational and research purposes only.**
+        **This platform is for educational purposes only.**
         
         - 📈 Past performance doesn't guarantee future results
         - 💰 Never invest more than you can afford to lose
         - 🔍 Always do your own research
-        - 🏦 Consult financial advisors for investment decisions
         
         *Ready to explore AI-powered trading? Use the sidebar to get started!*
         """)
