@@ -316,6 +316,18 @@ def safe_float(value):
     except:
         return 0.0
 
+def calculate_volatility(data):
+    """Safely calculate annual volatility"""
+    try:
+        returns = data['Close'].pct_change().dropna()
+        if len(returns) > 0:
+            volatility = returns.std() * np.sqrt(252) * 100
+            return float(volatility)
+        else:
+            return 0.0
+    except:
+        return 0.0
+
 def main():
     st.markdown('<h1 class="main-header">🤖 AI Trading Platform - India</h1>', unsafe_allow_html=True)
     st.markdown("### Advanced Intraday & 2-Day Trading with AI Models")
@@ -463,6 +475,9 @@ def main():
             macd_value = 0
             bb_position = 50
         
+        # Calculate volatility safely
+        volatility = calculate_volatility(data)
+        
         # Display indicators
         col1, col2 = st.columns(2)
         
@@ -474,7 +489,6 @@ def main():
         
         with col2:
             st.markdown("#### 📉 Momentum Indicators")
-            volatility = data['Close'].pct_change().std() * np.sqrt(252) * 100
             st.write(f"Annual Volatility: {volatility:.1f}%")
             
             volume_ratio = safe_float(data['Volume'].iloc[-1]) / safe_float(data['Volume'].tail(10).mean())
