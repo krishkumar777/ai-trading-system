@@ -3,13 +3,10 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import yfinance as yf
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, VotingRegressor
-from sklearn.preprocessing import StandardScaler, RobustScaler
+from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import accuracy_score
 import warnings
-from datetime import datetime, timedelta
 warnings.filterwarnings('ignore')
 
 # Page configuration
@@ -32,14 +29,6 @@ st.markdown("""
         margin-bottom: 1rem;
         font-weight: bold;
     }
-    .model-card {
-        background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
-        padding: 1.5rem;
-        border-radius: 15px;
-        margin: 1rem 0;
-        color: white;
-        box-shadow: 0 8px 25px rgba(0,0,0,0.3);
-    }
     .stock-card {
         background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
         padding: 1rem;
@@ -53,7 +42,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 class TechnicalAnalysis:
-    """Manual implementation of all technical indicators"""
+    """Manual implementation of technical indicators"""
     
     @staticmethod
     def calculate_rsi(prices, window=14):
@@ -82,14 +71,6 @@ class TechnicalAnalysis:
         upper_band = sma + (std * num_std)
         lower_band = sma - (std * num_std)
         return upper_band, sma, lower_band
-    
-    @staticmethod
-    def calculate_stochastic(high, low, close, window=14):
-        """Calculate Stochastic Oscillator manually"""
-        lowest_low = low.rolling(window=window).min()
-        highest_high = high.rolling(window=window).max()
-        stoch_k = 100 * (close - lowest_low) / (highest_high - lowest_low)
-        return stoch_k
 
 class NewsSentimentAnalyzer:
     def analyze_news_sentiment(self, symbol):
@@ -99,8 +80,7 @@ class NewsSentimentAnalyzer:
                 'RELIANCE.NS': 0.8, 'TCS.NS': 0.7, 'INFY.NS': 0.6, 'HDFCBANK.NS': 0.75,
                 'ICICIBANK.NS': 0.65, 'HINDUNILVR.NS': 0.7, 'SBIN.NS': 0.6, 'BHARTIARTL.NS': 0.55,
                 'KOTAKBANK.NS': 0.7, 'ITC.NS': 0.65, 'AXISBANK.NS': 0.6, 'LT.NS': 0.75,
-                'MARUTI.NS': 0.5, 'ASIANPAINT.NS': 0.7, 'HCLTECH.NS': 0.65, 'SUNPHARMA.NS': 0.6,
-                'TITAN.NS': 0.7, 'WIPRO.NS': 0.55, 'ULTRACEMCO.NS': 0.65, 'NESTLEIND.NS': 0.8
+                'MARUTI.NS': 0.5, 'ASIANPAINT.NS': 0.7, 'HCLTECH.NS': 0.65
             }
             
             sentiment = sentiments.get(symbol, 0.5)
@@ -188,7 +168,6 @@ class AdvancedAIModel:
             'gradient_boosting': GradientBoostingRegressor(n_estimators=50, random_state=42)
         }
         self.ensemble_model = None
-        self.feature_importance = {}
         self.tech_analysis = TechnicalAnalysis()
         
     def create_features(self, data):
@@ -203,15 +182,11 @@ class AdvancedAIModel:
         # Moving averages
         for window in [5, 10, 20]:
             df[f'SMA_{window}'] = df['Close'].rolling(window).mean()
-            df[f'EMA_{window}'] = df['Close'].ewm(span=window).mean()
         
         # Technical indicators
         df['RSI'] = self.tech_analysis.calculate_rsi(df['Close'])
         macd, signal = self.tech_analysis.calculate_macd(df['Close'])
         df['MACD'] = macd
-        bb_upper, bb_middle, bb_lower = self.tech_analysis.calculate_bollinger_bands(df['Close'])
-        df['BB_Upper'] = bb_upper
-        df['BB_Lower'] = bb_lower
         
         # Volume features
         df['Volume_SMA'] = df['Volume'].rolling(20).mean()
@@ -413,7 +388,6 @@ def main():
         rsi = tech_analysis.calculate_rsi(data['Close'])
         macd, macd_signal = tech_analysis.calculate_macd(data['Close'])
         bb_upper, bb_middle, bb_lower = tech_analysis.calculate_bollinger_bands(data['Close'])
-        stoch_k = tech_analysis.calculate_stochastic(data['High'], data['Low'], data['Close'])
         
         # Display indicators
         col1, col2 = st.columns(2)
@@ -426,9 +400,9 @@ def main():
         
         with col2:
             st.markdown("#### 📉 Momentum Indicators")
-            st.write(f"Stochastic K: {stoch_k.iloc[-1]:.1f}")
             st.write(f"20-day Volatility: {data['Close'].pct_change().std()*np.sqrt(252)*100:.1f}%")
             st.write(f"Volume Ratio: {data['Volume'].iloc[-1]/data['Volume'].tail(20).mean():.2f}")
+            st.write(f"5-day Return: {(data['Close'].iloc[-1] - data['Close'].iloc[-5])/data['Close'].iloc[-5]*100:.2f}%")
         
         # Trading Strategy
         st.markdown("## 💼 Trading Strategy")
@@ -464,6 +438,10 @@ def main():
             st.metric("Win Rate", "72.3%", "1.8%")
         with metrics_col3:
             st.metric("Avg Return/Trade", "1.8%", "0.3%")
+        
+        # Disclaimer
+        st.markdown("---")
+        st.warning("**⚠️ Disclaimer**: This platform is for educational purposes only. Past performance doesn't guarantee future results. Never invest more than you can afford to lose.")
     
     else:
         # Welcome page
@@ -472,7 +450,7 @@ def main():
         
         ### ✨ Features:
         - **🤖 AI-Powered Stock Selection** - Automatically picks best stocks
-        - **📊 Technical Analysis** - RSI, MACD, Bollinger Bands, Stochastic
+        - **📊 Technical Analysis** - RSI, MACD, Bollinger Bands
         - **📰 News Sentiment Analysis** - Real-time market sentiment
         - **🎯 Intraday & 2-Day Strategies** - Optimized holding periods
         - **🔄 Continuous Learning** - Models improve with new data
@@ -484,12 +462,10 @@ def main():
         4. Click **"Generate Trading Strategy"**
         5. Follow the AI-generated trading plan
         
-        ### ⚠️ Important Disclaimer:
-        **This platform is for educational purposes only.**
-        
-        - 📈 Past performance doesn't guarantee future results
-        - 💰 Never invest more than you can afford to lose
-        - 🔍 Always do your own research
+        ### 📊 Covered Indian Stocks:
+        - RELIANCE, TCS, INFOSYS, HDFC BANK, ICICI BANK
+        - HINDUNILVR, SBIN, BHARTI AIRTEL, KOTAK BANK, ITC
+        - And 5+ other major Indian companies
         
         *Ready to explore AI-powered trading? Use the sidebar to get started!*
         """)
